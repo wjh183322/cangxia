@@ -1,0 +1,114 @@
+import { RefreshCw, Settings, FolderClosed } from "lucide-react";
+import { CaptchaDialog } from "@/components/captcha-dialog";
+import { CollectView } from "@/components/collect-view";
+import { LibraryView } from "@/components/library-view";
+import { SettingsDialog } from "@/components/settings-dialog";
+import { Button } from "@/components/ui/button";
+import { Viewer } from "@/components/viewer";
+import { isDesktop } from "@/lib/desktop";
+import { useApp } from "@/lib/store";
+
+export function AppShell() {
+  const tab = useApp((s) => s.tab);
+  const setTab = useApp((s) => s.setTab);
+  const folders = useApp((s) => s.folders);
+  const folderId = useApp((s) => s.folderId);
+  const setFolder = useApp((s) => s.setFolder);
+  const works = useApp((s) => s.works);
+  const refresh = useApp((s) => s.refresh);
+  const finishRefresh = useApp((s) => s.finishRefresh);
+  const job = useApp((s) => s.job);
+  const setSettingsOpen = useApp((s) => s.setSettingsOpen);
+  const logout = useApp((s) => s.logout);
+  const account = useApp((s) => s.account);
+  const syncingBrowser = useApp((s) => s.syncingBrowser);
+  const syncCount = useApp((s) => s.syncCount);
+
+  return (
+    <div className="flex min-h-dvh flex-col bg-bg text-fg">
+      <header className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+        <div className="mr-2">
+          <p className="text-sm font-semibold tracking-tight">藏匣</p>
+          <p className="text-[11px] text-subtle">
+            {account.nickname || (isDesktop() ? "已登录" : "演示账号")}
+            {account.douyinId ? ` · ${account.douyinId}` : ""}
+            {isDesktop() ? " · 本机" : " · 预览"}
+          </p>
+        </div>
+        <div className="flex rounded-md bg-raised p-1">
+          <button
+            className={`h-9 rounded-sm px-3 text-sm ${tab === "collect" ? "bg-surface text-fg" : "text-muted"}`}
+            onClick={() => setTab("collect")}
+          >
+            收藏
+          </button>
+          <button
+            className={`h-9 rounded-sm px-3 text-sm ${tab === "library" ? "bg-surface text-fg" : "text-muted"}`}
+            onClick={() => setTab("library")}
+          >
+            图库
+          </button>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          {syncingBrowser && (
+            <Button size="sm" onClick={() => void finishRefresh()}>
+              停止，先用已读到的（{syncCount.works}）
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={() => void refresh()} disabled={job.active && !syncingBrowser}>
+            <RefreshCw className={`size-4 ${job.active ? "animate-spin" : ""}`} />
+            刷新
+          </Button>
+          <Button size="icon" variant="ghost" onClick={() => setSettingsOpen(true)} aria-label="设置">
+            <Settings className="size-4" />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => void logout()}>
+            退出
+          </Button>
+        </div>
+      </header>
+
+      {job.active && (
+        <div className="border-b border-line bg-surface px-4 py-2 text-xs text-muted">
+          {job.message}
+          {job.total > 0 && (
+            <span className="ml-2 tabular-nums">
+              {job.current}/{job.total}
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        {tab === "collect" && (
+          <aside className="flex gap-2 overflow-x-auto border-b border-line p-3 md:w-52 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
+            {folders.map((folder) => {
+              const count = works.filter(
+                (w) => w.folderId === folder.id || w.alsoInFolderIds.includes(folder.id),
+              ).length;
+              const active = folderId === folder.id;
+              return (
+                <button
+                  key={folder.id}
+                  onClick={() => setFolder(folder.id)}
+                  className={`flex min-h-11 shrink-0 items-center gap-2 rounded-md px-3 text-left text-sm ${
+                    active ? "bg-raised text-fg" : "text-muted hover:bg-raised/60"
+                  }`}
+                >
+                  <FolderClosed className="size-4 shrink-0" />
+                  <span className="truncate">{folder.name}</span>
+                  <span className="ml-auto tabular-nums text-xs text-subtle">{count}</span>
+                </button>
+              );
+            })}
+          </aside>
+        )}
+        {tab === "collect" ? <CollectView /> : <LibraryView />}
+      </div>
+
+      <CaptchaDialog />
+      <SettingsDialog />
+      <Viewer />
+    </div>
+  );
+}
