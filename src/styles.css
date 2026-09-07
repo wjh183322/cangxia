@@ -1,0 +1,59 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0c0c0d;
+  --color-surface: #161618;
+  --color-raised: #1e1e21;
+  --color-fg: #f2f1ee;
+  --color-muted: #8e8d89;
+  --color-subtle: #6a6966;
+  --color-line: #2a2a2e;
+  --color-accent: #c8ccd4;
+  --color-accent-fg: #0c0c0d;
+  --color-ok: #8fbfa7;
+  --color-warn: #c4a574;
+  --color-danger: #c98984;
+  --font-sans: "Noto Sans SC", "Segoe UI", system-ui, sans-serif;
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --aspect-portrait: 3 / 4;
+  --width-dialog: 60vw;
+  --height-dialog: 80dvh;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html,
+  body,
+  #app {
+    min-height: 100%;
+  }
+
+  body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-accent) 30%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
