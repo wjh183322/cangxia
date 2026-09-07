@@ -1,0 +1,14 @@
+node_modules/
+.output/
+.tanstack/
+dist/
+dist-win/
+artifacts/
+public/videos/
+public/covers/
+screenshots/
+*.log
+.DS_Store
+.env
+.env.*
+.cangxia/
