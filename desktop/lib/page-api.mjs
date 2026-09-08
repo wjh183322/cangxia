@@ -64,6 +64,21 @@ export function signUrlScript(method, url) {
   })()`;
 }
 
+export function pageFetchScript({ method = "GET", url, body = null }) {
+  return `(() => fetch(${JSON.stringify(url)}, {
+    method: ${JSON.stringify(method)},
+    credentials: "include",
+    headers: {
+      Accept: "application/json, text/plain, */*"${method === "POST" ? ',\n      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"' : ""}
+    }${body == null ? "" : `,\n    body: ${JSON.stringify(String(body))}`}
+  }).then(async (r) => {
+    const text = await r.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch {}
+    return { status: r.status, json, text: String(text || "").slice(0, 220) };
+  }).catch((e) => ({ status: 0, json: null, text: String(e) })))()`;
+}
+
 export function parseCollectsList(json) {
   if (!json || typeof json !== "object") return [];
   const data = json.data && typeof json.data === "object" ? json.data : json;

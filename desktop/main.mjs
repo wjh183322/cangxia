@@ -7,7 +7,7 @@ import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
 import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
-import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript } from "./lib/page-api.mjs";
+import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -430,7 +430,7 @@ async function waitForNewItems(prevCount, timeoutMs, folderName, folderId, start
       active: true,
       current: Math.min(got, max),
       total: max,
-      message: `正在识别「${folderName}」 ${got}/${max}，认完这一排再翻`,
+      message: `正在读取「${folderName}」 ${got}/${max}`,
     });
     if (got >= max) return true;
     await sleep(200);
@@ -540,7 +540,16 @@ async function signedRequest(win, { method = "GET", path, query = {}, body = nul
     aBogus = "";
   }
   const url = aBogus ? `${unsigned}&a_bogus=${encodeURIComponent(aBogus)}` : unsigned;
-  const res = await sessionRequest(method, url, body);
+  let res = { status: 0, json: null, text: "empty" };
+  try {
+    res = await win.webContents.executeJavaScript(pageFetchScript({ method, url, body }), true);
+  } catch (err) {
+    res = { status: 0, json: null, text: String(err?.message || err) };
+  }
+  if (!jsonOk(res?.json)) {
+    const fallback = await sessionRequest(method, url, body);
+    if (jsonOk(fallback.json)) res = fallback;
+  }
   res.signed = Boolean(aBogus);
   return res;
 }
@@ -673,6 +682,41 @@ async function harvestByApi(win, { folderId, folderName, max, started }) {
   return countProgress(folderId, folderName, started);
 }
 
+async function harvestByIntercept(win, { folderId, folderName, max, started }) {
+  refreshReading = true;
+  readingInside = true;
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: max,
+    message: `正在读取「${folderName}」 0/${max}`,
+  });
+  await waitForNewItems(captured.size, 8000, folderName, folderId, started, max);
+  if (countProgress(folderId, folderName, started) >= max) return countProgress(folderId, folderName, started);
+  let idle = 0;
+  while (win && !win.isDestroyed() && !refreshStop) {
+    while (refreshPaused && !refreshStop) await sleep(400);
+    if (refreshStop || !win || win.isDestroyed()) break;
+    const got = countProgress(folderId, folderName, started);
+    send("cangxia:progress", {
+      active: true,
+      current: Math.min(got, max),
+      total: max,
+      message: `正在读取「${folderName}」 ${got}/${max}`,
+    });
+    if (got >= max) break;
+    if (!readingHasMore && got > 0) break;
+    const before = captured.size;
+    await wheelBurst(win);
+    const grew = await waitForNewItems(before, 4000, folderName, folderId, started, max);
+    if (countProgress(folderId, folderName, started) >= max) break;
+    if (grew) idle = 0;
+    else idle += 1;
+    if (idle >= 4) break;
+  }
+  return countProgress(folderId, folderName, started);
+}
+
 async function openNamedFolder(win, folderName) {
   send("cangxia:progress", {
     active: true,
@@ -737,19 +781,50 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   refreshReading = true;
   try {
     await openFavoriteFresh(win);
-    const got = await harvestByApi(win, { folderId, folderName, max, started });
+    if (folderName === "收藏") {
+      await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+      await sleep(2500);
+      const got = await harvestByIntercept(win, { folderId, folderName, max, started });
+      send("cangxia:progress", {
+        active: true,
+        current: Math.min(got, max),
+        total: max,
+        message: got > 0 ? `已读「收藏」 ${got}/${max}` : "总收藏没读到，请确认已登录后再试",
+      });
+      return;
+    }
+    const viaApi = await harvestByApi(win, { folderId, folderName, max, started });
+    if (viaApi > 0) {
+      send("cangxia:progress", {
+        active: true,
+        current: Math.min(viaApi, max),
+        total: max,
+        message: `接口读完「${folderName}」 ${viaApi}/${max}`,
+      });
+      return;
+    }
     send("cangxia:progress", {
       active: true,
-      current: Math.min(got, max),
+      current: 0,
       total: max,
-      message: got > 0 ? `接口读完「${folderName}」 ${got}/${max}` : `接口没有读到「${folderName}」`,
+      message: `接口没读到「${folderName}」，改点收藏夹页拿列表`,
     });
+    await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+    await sleep(2000);
+    await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+    await sleep(3500);
+    readingCollectsId = folderIdByName(folderName);
+    if (readingCollectsId) {
+      const again = await harvestByApi(win, { folderId, folderName, max, started });
+      if (again > 0) return;
+    }
+    await harvestByIntercept(win, { folderId, folderName, max, started });
   } catch (err) {
     send("cangxia:progress", {
       active: true,
       current: 0,
       total: max,
-      message: `接口读取出错：${String(err?.message || err)}`.slice(0, 80),
+      message: `读取出错：${String(err?.message || err)}`.slice(0, 80),
     });
   }
 }
