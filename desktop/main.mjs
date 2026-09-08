@@ -21,6 +21,7 @@ protocol.registerSchemesAsPrivileged(
 let mainWindow = null;
 let douyinWindow = null;
 let qrWindow = null;
+let progressWindow = null;
 let account = null;
 const captured = new Map();
 let folders = [{ id: "default", name: "收藏", isDefault: true }];
@@ -33,8 +34,73 @@ let loginWaiting = false;
 let captchaLock = false;
 let lastCaptchaNotify = 0;
 
+let lastProgressPayload = null;
+
 function send(channel, payload) {
   mainWindow?.webContents.send(channel, payload);
+  if (channel === "cangxia:progress") {
+    lastProgressPayload = payload;
+    if (progressWindow && !progressWindow.isDestroyed()) {
+      progressWindow.webContents.send("cangxia:progress", payload);
+    }
+  }
+}
+
+function placeProgressWindow() {
+  if (!progressWindow || progressWindow.isDestroyed() || !douyinWindow || douyinWindow.isDestroyed()) return;
+  const bounds = douyinWindow.getBounds();
+  const width = 520;
+  const height = 88;
+  progressWindow.setBounds({
+    x: bounds.x + Math.round((bounds.width - width) / 2),
+    y: bounds.y + 16,
+    width,
+    height,
+  });
+}
+
+function openProgressWindow() {
+  if (progressWindow && !progressWindow.isDestroyed()) {
+    placeProgressWindow();
+    progressWindow.show();
+    return;
+  }
+  progressWindow = new BrowserWindow({
+    width: 520,
+    height: 88,
+    resizable: false,
+    frame: false,
+    title: "读取进度",
+    parent: douyinWindow || mainWindow || undefined,
+    modal: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: "#161618",
+    webPreferences: {
+      preload: join(__dirname, "read-progress-preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  progressWindow.setMenuBarVisibility(false);
+  progressWindow.webContents.on("did-finish-load", () => {
+    if (lastProgressPayload) progressWindow?.webContents.send("cangxia:progress", lastProgressPayload);
+  });
+  void progressWindow.loadFile(join(__dirname, "read-progress.html"));
+  placeProgressWindow();
+  if (douyinWindow && !douyinWindow.isDestroyed()) {
+    douyinWindow.on("move", placeProgressWindow);
+    douyinWindow.on("resize", placeProgressWindow);
+  }
+  progressWindow.on("closed", () => {
+    progressWindow = null;
+  });
+}
+
+function closeProgressWindow() {
+  if (progressWindow && !progressWindow.isDestroyed()) progressWindow.close();
+  progressWindow = null;
 }
 
 function uiIndex() {
@@ -191,6 +257,7 @@ async function snapshotWorks() {
 
 async function completeRefresh() {
   refreshReading = false;
+  closeProgressWindow();
   const snap = await snapshotWorks();
   send("cangxia:refresh-done", snap);
   send("cangxia:progress", { active: false, current: 0, total: 0, message: "" });
@@ -510,6 +577,7 @@ ipcMain.handle("cangxia:refresh", async () => {
   refreshReading = false;
   const max = Number(settings.maxPerRefresh) || 300;
   const win = openDouyinWindow("https://www.douyin.com/user/self", { forRefresh: true });
+  openProgressWindow();
   send("cangxia:progress", {
     active: true,
     current: 0,
