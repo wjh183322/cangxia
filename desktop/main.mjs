@@ -58,6 +58,15 @@ function shortUrl(url) {
   return `${host}${path}`.slice(-56);
 }
 
+function isNoiseUrl(url) {
+  return /zijieapi|monitor_browser|byteimg|\/goofy\/|mcs\.|\/report|\/log\/|sentry|collect\/batch/i.test(String(url || ""));
+}
+
+function isHarvestUrl(url) {
+  if (isNoiseUrl(url)) return false;
+  return isCollectFeedUrl(url) || isFolderListUrl(url);
+}
+
 function traceNet(url, tag) {
   netTrace.push(`${tag}:${shortUrl(url)}`);
   if (netTrace.length > 16) netTrace.shift();
@@ -244,7 +253,7 @@ async function attachNetwork(win) {
       }
       const mime = String(params.response?.mimeType || "");
       if (mime.includes("html") || mime.includes("image") || mime.includes("video") || mime.includes("font")) return;
-      if (!/aweme|collect|favorite|sns/i.test(url)) return;
+      if (!isHarvestUrl(url)) return;
       pending.set(params.requestId, url);
       traceNet(url, "net");
       return;
@@ -899,10 +908,12 @@ async function harvestMcp(win, ctx) {
       total: ctx.max || 1,
       message: `「${ctx.folderName}」滚回顶部，从第1条开始`,
     });
+    const kept = [...feedBuffer];
     await scrollGridTop(win);
-    feedBuffer = [];
     harvestIdOrder = [];
     await sleep(1600);
+    await drainPageFeeds(win);
+    if (!feedBuffer.length) feedBuffer = kept;
     replayFolderBuffer();
     await drainPageFeeds(win);
     const got = await harvestByIntercept(win, ctx);
