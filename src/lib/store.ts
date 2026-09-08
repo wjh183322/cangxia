@@ -610,10 +610,13 @@ export const useApp = create<AppState>()(
         let nextFolders = [...byId.values()].filter((f) => !deletedFolderIds.includes(f.id));
         if (!nextFolders.some((f) => f.isDefault)) nextFolders = [...emptyFolders(), ...nextFolders];
         if (!nextFolders.length) nextFolders = emptyFolders();
-        let chosen = [...(get().chosenFolderIds || [])];
-        if (!chosen.length) chosen = prev.filter((f) => !f.isDefault).map((f) => f.id);
+        let chosen = [...new Set([
+          ...(get().chosenFolderIds || []),
+          ...prev.filter((f) => !f.isDefault).map((f) => f.id),
+          ...prev.filter((f) => !f.isDefault).map((f) => f.name),
+        ])];
         for (const f of folders || []) {
-          if (!f.isDefault) chosen = [...new Set([...chosen, f.id])];
+          if (!f.isDefault) chosen = [...new Set([...chosen, f.id, f.name])];
         }
         const folderId = nextFolders.some((f) => f.id === get().folderId) ? get().folderId : nextFolders[0].id;
         const merged = mergeIncoming(existing, works);
@@ -846,7 +849,7 @@ export const useApp = create<AppState>()(
         }
         state.hiddenCollectIds = state.hiddenCollectIds || [];
         state.deletedFolderIds = state.deletedFolderIds || [];
-        if (!state.chosenFolderIds) {
+        if (!state.chosenFolderIds || !state.chosenFolderIds.length) {
           state.chosenFolderIds = (state.folders || []).filter((f) => !f.isDefault).map((f) => f.id);
         }
         state.pendingFolderPick = null;

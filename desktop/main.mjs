@@ -46,7 +46,7 @@ let lastHarvestCount = 0;
 let lastHarvestError = "";
 let netTrace = [];
 let knownSkip = new Set();
-let skipCount = 0;
+let skippedIds = new Set();
 
 function shortUrl(url) {
   const s = String(url || "");
@@ -369,7 +369,7 @@ function ingestPayload(url, json) {
     const inner = unwrapAweme(aweme) || aweme;
     const id = String(inner.aweme_id || inner.id || aweme.aweme_id || "");
     if (id && knownSkip.has(id)) {
-      skipCount += 1;
+      skippedIds.add(id);
       continue;
     }
     const isNew = id && !captured.has(id);
@@ -1029,7 +1029,6 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
   got = countProgress(folderId, folderName, started);
   if (got >= max) return got;
   let idle = 0;
-  let lastSkip = skipCount;
   while (win && !win.isDestroyed() && !refreshStop) {
     while (refreshPaused && !refreshStop) await sleep(400);
     if (refreshStop || !win || win.isDestroyed() || Date.now() > deadline) break;
@@ -1038,12 +1037,12 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
       active: true,
       current: Math.min(got, max),
       total: max,
-      message: `正在读取「${folderName}」新增 ${got}/${max}${skipCount ? `，已跳过 ${skipCount}` : ""}`,
+      message: `正在读取「${folderName}」新增 ${got}/${max}${skippedIds.size ? `，清单已有 ${skippedIds.size} 条先跳过` : ""}`,
     });
     if (got >= max) break;
     if (!readingHasMore && got > 0) break;
     const before = got;
-    const skipBefore = skipCount;
+    const skipBefore = skippedIds.size;
     await drainPageFeeds(win);
     await wheelBurst(win);
     await drainPageFeeds(win);
@@ -1051,11 +1050,11 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
     await drainPageFeeds(win);
     got = countProgress(folderId, folderName, started);
     if (got >= max) break;
-    if (grew || skipCount > skipBefore || skipCount > lastSkip) idle = 0;
+    if (grew || skippedIds.size > skipBefore) idle = 0;
     else idle += 1;
-    lastSkip = skipCount;
     if (idle >= 4 && got > 0) break;
-    if (idle >= 8) break;
+    if (idle >= 12 && !readingHasMore) break;
+    if (idle >= 16) break;
   }
   return countProgress(folderId, folderName, started);
 }
@@ -1507,7 +1506,7 @@ ipcMain.handle("cangxia:set-settings", async (_e, next) => {
 ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   captured.clear();
   knownSkip = new Set((opts.knownIds || []).map((id) => String(id)));
-  skipCount = 0;
+  skippedIds = new Set();
   refreshStop = false;
   refreshPaused = false;
   refreshReading = false;

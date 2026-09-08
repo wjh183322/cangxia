@@ -162,7 +162,7 @@ export function AppShell() {
                     <span className="truncate">{folder.name}</span>
                     <span className="ml-auto tabular-nums text-xs text-subtle">{count}</span>
                   </button>
-                  {tab === "collect" && (
+                  {tab === "collect" && !folder.isDefault && (
                     <button
                       type="button"
                       className="flex size-8 shrink-0 items-center justify-center rounded-sm text-subtle hover:bg-surface hover:text-fg"
