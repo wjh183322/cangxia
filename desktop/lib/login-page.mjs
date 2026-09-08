@@ -178,19 +178,41 @@ export const OPEN_FAVORITE_SCRIPT = `(() => {
     return r.width > 8 && r.height > 8 && r.top > 70 && r.top < 520;
   };
   const nodes = [...document.querySelectorAll("span, div, a, button, p, li")];
-  if (nodes.some((el) => vis(el) && textOf(el) === "收藏夹")) return "already";
-  const fav = nodes.find((el) => {
-    if (!vis(el) || el.childElementCount > 5) return false;
-    const t = textOf(el);
-    return t === "收藏";
-  });
-  if (fav) {
-    const target = fav.closest("a, button, [role='tab']") || fav;
-    target.click();
-    return "clicked";
-  }
-  return "none";
+  const fav = nodes.find((el) => vis(el) && el.childElementCount <= 5 && textOf(el) === "收藏");
+  if (!fav) return "none";
+  (fav.closest("a, button, [role='tab']") || fav).click();
+  return "clicked";
 })()`;
+
+export const CLICK_FOLDER_TAB_SCRIPT = `(() => {
+  const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
+  const nodes = [...document.querySelectorAll("span, div, a, button, p, li")];
+  const hit = nodes.find((el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 8 && r.height > 8 && r.top > 90 && r.top < 420 && textOf(el) === "收藏夹";
+  });
+  if (!hit) return "none";
+  (hit.closest("a, button, [role='tab']") || hit).click();
+  return "clicked";
+})()`;
+
+export function clickFolderCardScript(name) {
+  return `(() => {
+    const want = ${JSON.stringify(name)};
+    const textOf = (el) => (el.innerText || "").replace(/\\s+/g, "");
+    const nodes = [...document.querySelectorAll("div, a, span, li, section")];
+    const cards = nodes.filter((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.width < 140 || r.height < 70) return false;
+      const t = textOf(el);
+      return t.startsWith(want + "共") || (t.startsWith(want) && /共\\d+作品/.test(t));
+    });
+    cards.sort((a, b) => textOf(a).length - textOf(b).length);
+    if (!cards[0]) return "none";
+    (cards[0].closest("a, button") || cards[0]).click();
+    return "clicked";
+  })()`;
+}
 
 export const SCROLL_FEED_SCRIPT = `(() => {
   const step = 380;

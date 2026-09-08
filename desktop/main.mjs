@@ -6,7 +6,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, SCROLL_FEED_SCRIPT, clickSideFolderScript, installFolderWatchScript, isHttpUrl } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, installFolderWatchScript, isHttpUrl } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -33,6 +33,8 @@ let readingFolderName = "";
 let readingMax = 300;
 let readingStarted = 0;
 let readingFolderId = "default";
+let readingPattern = "listcollection";
+let readingHasMore = true;
 let readChoiceResolve = null;
 let loginWaiting = false;
 let captchaLock = false;
@@ -271,7 +273,13 @@ function ingestPayload(url, json) {
     }
   }
   if (!refreshReading) return;
-  if (!isCollectFeedUrl(url)) return;
+  const isList = /listcollection/i.test(url);
+  const isFolderFeed = /collects\/video\/list/i.test(url);
+  if (readingPattern === "listcollection" ? !isList : !isFolderFeed) return;
+  const root = json.data || json;
+  if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
+    readingHasMore = Boolean(Number(root.has_more));
+  }
   const awemes = collectAwemes(json);
   const reading = readingFolderName || "收藏";
   const cap = Math.max(1, Number(readingMax) || 300);
@@ -373,10 +381,32 @@ async function waitForNewItems(prevCount, timeoutMs, folderName, folderId, start
   return captured.size > prevCount;
 }
 
+async function wheelBurst(win) {
+  const wc = win.webContents;
+  wc.sendInputEvent({ type: "mouseMove", x: 640, y: 420 });
+  await sleep(80);
+  for (let i = 0; i < 6; i++) {
+    if (refreshStop || !win || win.isDestroyed()) return;
+    wc.sendInputEvent({
+      type: "mouseWheel",
+      x: 640,
+      y: 420,
+      deltaX: 0,
+      deltaY: 900,
+      canScroll: true,
+    });
+    await sleep(600);
+  }
+}
+
 async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   try {
     if (folderName && folderName !== "收藏") {
-      await win.webContents.executeJavaScript(clickSideFolderScript(folderName));
+      await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+      await sleep(2500);
+      await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+      await sleep(2500);
+      await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
     } else {
       await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
     }
@@ -384,7 +414,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     return;
   }
 
-  await waitForNewItems(captured.size, 6000, folderName, folderId, started, max);
+  await waitForNewItems(captured.size, 7000, folderName, folderId, started, max);
   if (countProgress(folderId, folderName, started) >= max) return;
 
   let idle = 0;
@@ -399,25 +429,20 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
       message: `正在读取「${folderName}」 ${got}/${max}`,
     });
     if (got >= max) return;
+    if (!readingHasMore && got > 0) return;
     const before = captured.size;
-    let scrolled = "row";
-    try {
-      scrolled = await win.webContents.executeJavaScript(SCROLL_FEED_SCRIPT);
-    } catch {
-      return;
-    }
+    await wheelBurst(win);
     send("cangxia:progress", {
       active: true,
       current: Math.min(got, max),
       total: max,
-      message: `往下翻了一排，等待识别「${folderName}」 ${got}/${max}`,
+      message: `滚轮翻页，等待「${folderName}」 ${got}/${max}`,
     });
-    const grew = await waitForNewItems(before, 5000, folderName, folderId, started, max);
+    const grew = await waitForNewItems(before, 4000, folderName, folderId, started, max);
     if (countProgress(folderId, folderName, started) >= max) return;
     if (grew) idle = 0;
     else idle += 1;
-    if (scrolled === "end" && !grew) return;
-    if (idle >= 3) return;
+    if (idle >= 4) return;
   }
 }
 
@@ -510,6 +535,8 @@ async function watchAndRead(win, max) {
         readingFolderId = folder.id;
         readingMax = max;
         readingStarted = countInFolder(folder.id);
+        readingPattern = readingFolderName === "收藏" ? "listcollection" : "collects/video/list";
+        readingHasMore = true;
         const started = readingStarted;
         await scrollUntilCap(win, {
           folderId: folder.id,
