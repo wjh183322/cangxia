@@ -53,11 +53,14 @@ function videoCandidates(video) {
       (Number(b.bit_rate) || Number(b.data_size) || 0) - (Number(a.bit_rate) || Number(a.data_size) || 0),
   );
   for (const rate of pool) {
+    for (const u of rate?.download_addr?.url_list || []) push(u);
+  }
+  for (const u of video.download_addr?.url_list || []) push(u);
+  for (const rate of pool) {
     for (const u of rate?.play_addr?.url_list || rate?.play_addr_h264?.url_list || []) push(u);
   }
   for (const u of video.play_addr_h264?.url_list || []) push(u);
   for (const u of video.play_addr?.url_list || []) push(u);
-  for (const u of video.download_addr?.url_list || []) push(u);
   return urls;
 }
 

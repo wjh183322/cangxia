@@ -123,6 +123,24 @@ test("mapAweme video skips h265 for a playable mp4", () => {
   assert.equal(work.videoUrl, "https://x/avc.mp4");
 });
 
+test("mapAweme video prefers download_addr over play_addr", () => {
+  const work = mapAweme(
+    {
+      aweme_id: "nwm",
+      desc: "舞",
+      video: {
+        origin_cover: { url_list: ["https://x/still.jpg"] },
+        play_addr: { url_list: ["https://x/playwm.mp4"] },
+        download_addr: { url_list: ["https://x/nwm.mp4"] },
+      },
+      author: { nickname: "山", unique_id: "shan" },
+    },
+    { id: "default", name: "收藏" },
+  );
+  assert.equal(work.videoUrl, "https://x/nwm.mp4");
+  assert.equal(work.videos[0].urls[0], "https://x/nwm.mp4");
+});
+
 test("mapAweme builds iesdouyin play url from video uri", () => {
   const work = mapAweme(
     {
