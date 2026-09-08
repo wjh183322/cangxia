@@ -18,6 +18,15 @@ export function DesktopBridge() {
     const offCount = api.onSyncCount((syncCount) => useApp.setState({ syncCount }));
     const offDone = api.onRefreshDone((data) => {
       useApp.getState().applyRefreshResult(data.folders, data.works);
+      if (data.method) {
+        useApp.setState({
+          lastRead: {
+            method: data.method,
+            folder: data.folder || "",
+            count: Number(data.harvested || 0),
+          },
+        });
+      }
     });
     const offCaptcha = api.onCaptcha(() => {
       const s = useApp.getState();

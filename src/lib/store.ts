@@ -63,6 +63,7 @@ interface AppState {
   pendingFolderDeleteId: string | null;
   loginGate: boolean;
   pendingReadAfterLogin: boolean;
+  lastRead: { method: string; folder: string; count: number } | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
   openLoginGate: () => void;
@@ -110,6 +111,7 @@ interface AppState {
   refresh: () => Promise<void>;
   finishRefresh: () => Promise<void>;
   applyRefreshResult: (folders: Folder[], works: Work[]) => void;
+  dismissLastRead: () => void;
   startDownload: (ids: string[]) => void;
   hideFromCollect: (ids: string[]) => void;
   hideFolderFromCollect: (folderId: string) => void;
@@ -208,6 +210,7 @@ export const useApp = create<AppState>()(
       pendingFolderDeleteId: null,
       loginGate: false,
       pendingReadAfterLogin: false,
+      lastRead: null,
 
       login: async () => {
         const api = desktop();
@@ -557,6 +560,7 @@ export const useApp = create<AppState>()(
           job: { active: false, current: 0, total: 0, message: "" },
         });
       },
+      dismissLastRead: () => set({ lastRead: null }),
 
       hideFromCollect: (ids) => {
         const unique = [...new Set(ids.filter(Boolean))];

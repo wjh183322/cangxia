@@ -35,7 +35,13 @@ export interface DesktopApi {
   onCaptcha: (cb: (data: { reason: string }) => void) => () => void;
   onWorkStatus: (cb: (data: { id: string; status: Work["status"]; videoStatus?: Work["videoStatus"] }) => void) => () => void;
   onSyncCount: (cb: (data: { works: number; folders: number }) => void) => () => void;
-  onRefreshDone: (cb: (data: { folders: Folder[]; works: Work[] }) => void) => () => void;
+  onRefreshDone: (cb: (data: {
+    folders: Folder[];
+    works: Work[];
+    method?: string;
+    folder?: string;
+    harvested?: number;
+  }) => void) => () => void;
   onDl: (cb: (data: Record<string, unknown>) => void) => () => void;
 }
 

@@ -11,6 +11,7 @@ import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScri
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
+if (process.platform === "win32") app.setAppUserModelId("com.cangxia.app");
 
 protocol.registerSchemesAsPrivileged(
   APP_SCHEMES.map((scheme) => ({
@@ -40,6 +41,8 @@ let readingOrder = 0;
 let seenThisRead = new Set();
 let readingCollectsId = "";
 let readingInside = false;
+let lastHarvestMethod = "";
+let lastHarvestCount = 0;
 let feedBuffer = [];
 let readChoiceResolve = null;
 let loginWaiting = false;
@@ -395,6 +398,9 @@ async function snapshotWorks() {
 
 async function completeRefresh() {
   const snap = await snapshotWorks();
+  const method = lastHarvestMethod;
+  const folder = readingFolderName;
+  const harvested = lastHarvestCount;
   refreshReading = false;
   readingFolderName = "";
   readingStarted = 0;
@@ -402,8 +408,20 @@ async function completeRefresh() {
   feedBuffer = [];
   seenThisRead = new Set();
   closeProgressWindow();
-  send("cangxia:refresh-done", snap);
+  send("cangxia:refresh-done", { ...snap, method, folder, harvested });
   send("cangxia:progress", { active: false, current: 0, total: 0, message: "" });
+  if (method) {
+    try {
+      new Notification({
+        title: harvested > 0 ? "藏匣读取完成" : "藏匣没有读到",
+        body: harvested > 0 ? `${method} 读到「${folder || "收藏"}」${harvested} 条` : method,
+      }).show();
+    } catch {
+      /* ignore */
+    }
+  }
+  lastHarvestMethod = "";
+  lastHarvestCount = 0;
 }
 
 function countInFolder(folderId) {
@@ -831,6 +849,8 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
       });
       const got = await run();
       if (got > 0) {
+        lastHarvestMethod = label;
+        lastHarvestCount = got;
         send("cangxia:progress", {
           active: true,
           current: Math.min(got, max),
@@ -840,6 +860,8 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
         return;
       }
     }
+    lastHarvestMethod = `五种方法都没读到「${folderName}」`;
+    lastHarvestCount = 0;
     send("cangxia:progress", {
       active: true,
       current: 0,
