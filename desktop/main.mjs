@@ -6,7 +6,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, installFolderWatchScript, isHttpUrl } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, installFolderWatchScript, isHttpUrl, validFolderName } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -37,6 +37,7 @@ let readingPattern = "listcollection";
 let readingHasMore = true;
 let readingOrder = 0;
 let seenThisRead = new Set();
+let readingCollectsId = "";
 let readChoiceResolve = null;
 let loginWaiting = false;
 let captchaLock = false;
@@ -278,6 +279,11 @@ function ingestPayload(url, json) {
   const isList = /listcollection/i.test(url);
   const isFolderFeed = /collects\/video\/list/i.test(url);
   if (readingPattern === "listcollection" ? !isList : !isFolderFeed) return;
+  const collectsMatch = String(url).match(/collects_id=(\d+)/);
+  if (isFolderFeed && collectsMatch) {
+    if (!readingCollectsId) readingCollectsId = collectsMatch[1];
+    else if (collectsMatch[1] !== readingCollectsId) return;
+  }
   const root = json.data || json;
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
@@ -410,18 +416,39 @@ async function wheelBurst(win) {
   }
 }
 
+async function openNamedFolder(win, folderName) {
+  await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+  await sleep(2200);
+  await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+  await sleep(2200);
+  let how = "none";
+  try {
+    how = await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
+  } catch {
+    how = "none";
+  }
+  await sleep(1600);
+  return how;
+}
+
 async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   readingOrder = 0;
   readingHasMore = true;
   seenThisRead = new Set();
+  readingCollectsId = "";
   try {
     await openFavoriteFresh(win);
     if (folderName && folderName !== "收藏") {
-      await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-      await sleep(2500);
-      await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
-      await sleep(2500);
-      await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
+      const how = await openNamedFolder(win, folderName);
+      if (how === "none") {
+        send("cangxia:progress", {
+          active: true,
+          current: 0,
+          total: max,
+          message: `没点进「${folderName}」，已停止。请再点读取收藏后进这个夹`,
+        });
+        return;
+      }
     } else {
       await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
     }
@@ -538,7 +565,8 @@ async function watchAndRead(win, max) {
       continue;
     }
     const key = `${state?.view || "other"}:${state?.name || ""}`;
-    if ((state.view === "favorite" || state.view === "folder") && state.name && state.name !== "收藏夹" && !denied.has(key)) {
+    const nameOk = state.name === "收藏" || validFolderName(state.name);
+    if ((state.view === "favorite" || state.view === "folder") && state.name && nameOk && !denied.has(key)) {
       send("cangxia:progress", {
         active: true,
         current: 0,

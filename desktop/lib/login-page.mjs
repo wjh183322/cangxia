@@ -196,6 +196,13 @@ export const CLICK_FOLDER_TAB_SCRIPT = `(() => {
   return "clicked";
 })()`;
 
+export function validFolderName(name) {
+  const n = String(name || "").trim();
+  if (!n || n.length > 16) return false;
+  if (/收藏夹|视频|音乐|合集|短剧|新建|添加视频|批量管理|返回|观看历史|稍后再看|我的预约/.test(n)) return false;
+  return true;
+}
+
 export function clickFolderCardScript(name) {
   return `(() => {
     const want = ${JSON.stringify(name)};
@@ -203,14 +210,29 @@ export function clickFolderCardScript(name) {
     const nodes = [...document.querySelectorAll("div, a, span, li, section")];
     const cards = nodes.filter((el) => {
       const r = el.getBoundingClientRect();
-      if (r.width < 140 || r.height < 70) return false;
+      if (r.width < 140 || r.height < 70 || r.width > 680) return false;
       const t = textOf(el);
-      return t.startsWith(want + "共") || (t.startsWith(want) && /共\\d+作品/.test(t));
+      if (t.length > 36) return false;
+      return t.startsWith(want + "共") && /共\\d+作品/.test(t);
     });
     cards.sort((a, b) => textOf(a).length - textOf(b).length);
-    if (!cards[0]) return "none";
-    (cards[0].closest("a, button") || cards[0]).click();
-    return "clicked";
+    if (cards[0]) {
+      (cards[0].closest("a, button") || cards[0]).click();
+      return "card";
+    }
+    const rows = nodes.filter((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.left > 400 || r.width < 70 || r.height < 28 || r.height > 92) return false;
+      const t = textOf(el);
+      if (t.length > want.length + 8) return false;
+      return t === want || (t.startsWith(want) && /\\d{1,5}$/.test(t));
+    });
+    rows.sort((a, b) => textOf(a).length - textOf(b).length);
+    if (rows[0]) {
+      (rows[0].closest("a, button, li") || rows[0]).click();
+      return "row";
+    }
+    return "none";
   })()`;
 }
 
@@ -290,17 +312,26 @@ export function installFolderWatchScript(knownNames = []) {
   const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
   const skipName = /^(作品|推荐|喜欢|收藏|收藏夹|视频|音乐|合集|短剧|话题|特效|精选|关注|朋友|我的|直播|批量管理|新建收藏夹|观看历史|稍后再看|我的预约|我的收藏夹|添加视频|返回|搜索你收藏的作品)$/;
   const stripLock = (s) => String(s || "").replace(/[🔒锁★☆\\u2B50\\u2605\\u2606]/g, "");
+  const junk = /收藏夹|视频|音乐|合集|短剧|新建|添加视频|批量管理|返回/;
+  const validName = (name) => {
+    if (!name || name.length > 16) return false;
+    if (skipName.test(name) || junk.test(name)) return false;
+    return true;
+  };
   const parseCard = (raw) => {
     const t = stripLock(raw);
-    const m = t.match(/^(.{1,24}?)共\\d+作品/);
-    return m ? m[1].trim() : "";
+    if (t.length > 36) return "";
+    const m = t.match(/^(.{1,16}?)共\\d+作品/);
+    const name = m ? m[1].trim() : "";
+    return validName(name) ? name : "";
   };
   const parseRow = (raw) => {
     const t = stripLock(raw);
-    const m = t.match(/^(.{1,24}?)(\\d{1,5})$/);
+    if (t.length > 28) return "";
+    const m = t.match(/^(.{1,16}?)(\\d{1,5})$/);
     if (!m) return "";
     const name = m[1].trim();
-    if (!name || skipName.test(name) || /^\\d+$/.test(name)) return "";
+    if (!validName(name) || /^\\d+$/.test(name)) return "";
     return name;
   };
   const lumOf = (el) => {
@@ -317,10 +348,11 @@ export function installFolderWatchScript(knownNames = []) {
       const r = el.getBoundingClientRect();
       if (r.width < 140 || r.height < 70) continue;
       const t = textOf(el);
-      const m = t.match(/^(.{1,24}?)共(\\d+)作品/);
+      if (t.length > 36) continue;
+      const m = t.match(/^(.{1,16}?)共(\\d+)作品/);
       if (!m) continue;
       const name = m[1].replace(/锁|🔒/g, "").trim();
-      if (!name || skipName.test(name)) continue;
+      if (!validName(name)) continue;
       const prev = seen.get(name);
       if (!prev || t.length < prev.len) seen.set(name, { name, count: Number(m[2]), len: t.length });
     }
@@ -384,9 +416,9 @@ export function installFolderWatchScript(knownNames = []) {
       for (let i = 0; i < 18 && n; i += 1) {
         const raw = textOf(n);
         const fromCard = parseCard(raw);
-        if (fromCard) card = fromCard;
+        if (fromCard && (!card || fromCard.length < card.length)) card = fromCard;
         const fromRow = parseRow(raw);
-        if (fromRow) row = fromRow;
+        if (fromRow && (!row || fromRow.length < row.length)) row = fromRow;
         if (raw === "作品" || raw === "推荐" || raw === "喜欢" || raw === "观看历史" || raw === "稍后再看") {
           window.__cangxiaWatch = { view: "other", name: "", cards: listCards() };
           return;
@@ -401,7 +433,7 @@ export function installFolderWatchScript(knownNames = []) {
         if (knownHit) best = knownHit;
         n = n.parentElement;
       }
-      const name = card || row || (best && best !== "收藏" ? best : "");
+      const name = [card, row, best].find((n) => n && n !== "收藏" && validName(n)) || "";
       if (name) {
         window.__cangxiaWatch = { view: "folder", name, cards: listCards() };
         return;
@@ -415,10 +447,9 @@ export function installFolderWatchScript(knownNames = []) {
   const hasBack = hasText("返回", 160);
   const selected = pickSelected(side);
   if (hasPanel || hasBack) {
-    const name = window.__cangxiaWatch.view === "folder" && window.__cangxiaWatch.name && window.__cangxiaWatch.name !== "收藏夹"
-      ? window.__cangxiaWatch.name
-      : selected;
-    if (name && name !== "收藏夹") {
+    const clicked = window.__cangxiaWatch.view === "folder" ? window.__cangxiaWatch.name : "";
+    const name = [selected, clicked].find((n) => n && validName(n)) || "";
+    if (name) {
       window.__cangxiaWatch = { view: "folder", name, cards, side: side.map((s) => s.name) };
     } else {
       window.__cangxiaWatch = { view: "folder-list", name: "", cards, side: side.map((s) => s.name) };
