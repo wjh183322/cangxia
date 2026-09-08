@@ -14,7 +14,7 @@ import {
   type DlTask,
 } from "./download";
 import { abortDesktop, kickDownload } from "./download-pump";
-import type { AppTab, DownloadJob, Folder, KindFilter, Settings, Work } from "./types";
+import type { AppTab, DownloadJob, Folder, FolderPickItem, KindFilter, Settings, Work } from "./types";
 import { applyDeletedWorks, matchesKind, videoStatusOf, workNeedsDownload } from "./utils";
 
 interface AppState {
@@ -61,8 +61,12 @@ interface AppState {
   hiddenCollectIds: string[];
   deletedFolderIds: string[];
   pendingFolderDeleteId: string | null;
+  pendingFolderPick: FolderPickItem[] | null;
+  folderPickChecked: string[];
+  chosenFolderIds: string[];
   loginGate: boolean;
   pendingReadAfterLogin: boolean;
+  pendingListFoldersAfterLogin: boolean;
   lastRead: { method: string; folder: string; count: number } | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
@@ -109,8 +113,14 @@ interface AppState {
   setDlExpanded: (id: string | null) => void;
   openWorkFolder: (workId: string) => void;
   refresh: () => Promise<void>;
+  listFolders: () => Promise<void>;
   finishRefresh: () => Promise<void>;
   applyRefreshResult: (folders: Folder[], works: Work[]) => void;
+  openFolderPick: (folders: FolderPickItem[]) => void;
+  toggleFolderPick: (id: string) => void;
+  setFolderPickAll: (on: boolean) => void;
+  confirmFolderPick: () => void;
+  cancelFolderPick: () => void;
   dismissLastRead: () => void;
   startDownload: (ids: string[]) => void;
   hideFromCollect: (ids: string[]) => void;
@@ -210,8 +220,12 @@ export const useApp = create<AppState>()(
       hiddenCollectIds: [],
       deletedFolderIds: [],
       pendingFolderDeleteId: null,
+      pendingFolderPick: null,
+      folderPickChecked: [],
+      chosenFolderIds: liveDesktop() ? [] : FOLDERS.filter((f) => !f.isDefault).map((f) => f.id),
       loginGate: false,
       pendingReadAfterLogin: false,
+      pendingListFoldersAfterLogin: false,
       lastRead: null,
 
       login: async () => {
@@ -221,23 +235,28 @@ export const useApp = create<AppState>()(
           if (res.ok && res.account) {
             const cleaned = stripDemoState(get());
             const readNext = get().pendingReadAfterLogin;
+            const listNext = get().pendingListFoldersAfterLogin;
             set({
               loggedIn: true,
               loginGate: false,
               pendingReadAfterLogin: false,
+              pendingListFoldersAfterLogin: false,
               account: res.account,
               works: cleaned.works,
               folders: cleaned.folders,
               folderId: cleaned.folderId,
               dlTasks: cleaned.dlTasks,
             });
-            if (readNext) void get().refresh();
+            if (listNext) void get().listFolders();
+            else if (readNext) void get().refresh();
           }
           return;
         }
         const readNext = get().pendingReadAfterLogin;
-        set({ loggedIn: true, loginGate: false, pendingReadAfterLogin: false, account: DEMO_USER });
-        if (readNext) void get().refresh();
+        const listNext = get().pendingListFoldersAfterLogin;
+        set({ loggedIn: true, loginGate: false, pendingReadAfterLogin: false, pendingListFoldersAfterLogin: false, account: DEMO_USER });
+        if (listNext) void get().listFolders();
+        else if (readNext) void get().refresh();
       },
       logout: async () => {
         const api = desktop();
@@ -246,6 +265,7 @@ export const useApp = create<AppState>()(
           loggedIn: false,
           loginGate: true,
           pendingReadAfterLogin: false,
+          pendingListFoldersAfterLogin: false,
           selectedIds: [],
           libraryWorkId: null,
           viewerIndex: null,
@@ -263,8 +283,8 @@ export const useApp = create<AppState>()(
           account: { nickname: "", douyinId: "" },
         });
       },
-      openLoginGate: () => set({ loginGate: true, pendingReadAfterLogin: false }),
-      skipLoginGate: () => set({ loginGate: false, pendingReadAfterLogin: false }),
+      openLoginGate: () => set({ loginGate: true, pendingReadAfterLogin: false, pendingListFoldersAfterLogin: false }),
+      skipLoginGate: () => set({ loginGate: false, pendingReadAfterLogin: false, pendingListFoldersAfterLogin: false }),
       setTab: (tab) =>
         set({
           tab,
@@ -538,6 +558,29 @@ export const useApp = create<AppState>()(
         });
       },
 
+      listFolders: async () => {
+        if (!get().loggedIn) {
+          set({ loginGate: true, pendingListFoldersAfterLogin: true });
+          return;
+        }
+        const api = desktop();
+        if (api) {
+          await api.setSettings(get().settings);
+          set({
+            job: { active: true, current: 0, total: 1, message: "正在读取收藏夹名单…" },
+            syncingBrowser: true,
+          });
+          await api.listFolders();
+          return;
+        }
+        const demo = get().folders.filter((f) => !f.isDefault).map((f) => ({ id: f.id, name: f.name }));
+        set({
+          pendingFolderPick: demo.length ? demo : [{ id: "folder_demo", name: "雷电将军" }],
+          folderPickChecked: get().chosenFolderIds,
+          job: { active: false, current: 0, total: 0, message: "" },
+        });
+      },
+
       finishRefresh: async () => {
         const api = desktop();
         if (!api) return;
@@ -559,17 +602,87 @@ export const useApp = create<AppState>()(
         let nextFolders = [...byId.values()].filter((f) => !deletedFolderIds.includes(f.id));
         if (!nextFolders.some((f) => f.isDefault)) nextFolders = [...emptyFolders(), ...nextFolders];
         if (!nextFolders.length) nextFolders = emptyFolders();
+        let chosen = [...(get().chosenFolderIds || [])];
+        if (!chosen.length) chosen = prev.filter((f) => !f.isDefault).map((f) => f.id);
+        for (const f of folders || []) {
+          if (!f.isDefault) chosen = [...new Set([...chosen, f.id])];
+        }
         const folderId = nextFolders.some((f) => f.id === get().folderId) ? get().folderId : nextFolders[0].id;
+        const merged = mergeIncoming(existing, works);
+        const toMove = merged.flatMap((w) => {
+          const last = existing.find((p) => p.id === w.id);
+          if (!last) return [];
+          const wasDefault = !last.folderId || last.folderId === "default";
+          if (!wasDefault || !w.folderId || w.folderId === "default") return [];
+          if (w.status !== "downloaded" && w.status !== "stale") return [];
+          const toName = nextFolders.find((f) => f.id === w.folderId)?.name;
+          if (!toName || toName === "收藏") return [];
+          return [{ id: w.id, title: w.title, fromName: "收藏", toName }];
+        });
+        if (toMove.length) {
+          const api = desktop();
+          if (api?.moveWorks) void api.moveWorks({ works: toMove });
+        }
         set({
           folders: nextFolders,
           folderId,
-          works: mergeIncoming(existing, works),
+          chosenFolderIds: chosen,
+          works: merged,
           hiddenCollectIds: get().hiddenCollectIds.filter((id) => !seen.has(id)),
           deletedFolderIds,
           syncingBrowser: false,
           job: { active: false, current: 0, total: 0, message: "" },
         });
       },
+      openFolderPick: (list) => {
+        const visible = new Set(get().chosenFolderIds);
+        const checked = list.filter((f) => visible.has(f.id) || visible.has(f.name)).map((f) => f.id);
+        set({
+          pendingFolderPick: list,
+          folderPickChecked: checked.length ? checked : [],
+          syncingBrowser: false,
+          job: { active: false, current: 0, total: 0, message: "" },
+        });
+      },
+      toggleFolderPick: (id) => {
+        set((s) => ({
+          folderPickChecked: s.folderPickChecked.includes(id)
+            ? s.folderPickChecked.filter((x) => x !== id)
+            : [...s.folderPickChecked, id],
+        }));
+      },
+      setFolderPickAll: (on) => {
+        const list = get().pendingFolderPick || [];
+        set({ folderPickChecked: on ? list.map((f) => f.id) : [] });
+      },
+      confirmFolderPick: () => {
+        const list = get().pendingFolderPick || [];
+        const checked = new Set(get().folderPickChecked);
+        const selected = list.filter((f) => checked.has(f.id));
+        let folders = get().folders;
+        for (const f of selected) {
+          if (!folders.some((x) => x.id === f.id || x.name === f.name)) {
+            folders = [...folders, { id: f.id, name: f.name, isDefault: false }];
+          }
+        }
+        const chosenFolderIds = selected.map((f) => folders.find((x) => x.id === f.id || x.name === f.name)?.id || f.id);
+        const folderId = folders.some((f) => f.id === get().folderId && (f.isDefault || chosenFolderIds.includes(f.id)))
+          ? get().folderId
+          : "default";
+        const libraryFolderId =
+          get().libraryFolderId === "all" || get().libraryFolderId === "default" || chosenFolderIds.includes(get().libraryFolderId)
+            ? get().libraryFolderId
+            : "all";
+        set({
+          folders,
+          chosenFolderIds,
+          folderId,
+          libraryFolderId,
+          pendingFolderPick: null,
+          folderPickChecked: [],
+        });
+      },
+      cancelFolderPick: () => set({ pendingFolderPick: null, folderPickChecked: [] }),
       dismissLastRead: () => set({ lastRead: null }),
 
       hideFromCollect: (ids) => {
@@ -611,6 +724,7 @@ export const useApp = create<AppState>()(
           libraryFolderId: get().libraryFolderId === id ? "all" : get().libraryFolderId,
           hiddenCollectIds: [...new Set([...get().hiddenCollectIds, ...hideIds])],
           deletedFolderIds: [...new Set([...get().deletedFolderIds, id])],
+          chosenFolderIds: get().chosenFolderIds.filter((x) => x !== id),
           pendingFolderDeleteId: null,
           selectedIds: get().selectedIds.filter((x) => !hideIds.includes(x)),
         });
@@ -699,6 +813,7 @@ export const useApp = create<AppState>()(
         dlTasks: s.dlTasks,
         hiddenCollectIds: s.hiddenCollectIds,
         deletedFolderIds: s.deletedFolderIds,
+        chosenFolderIds: s.chosenFolderIds,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
@@ -715,6 +830,11 @@ export const useApp = create<AppState>()(
         }
         state.hiddenCollectIds = state.hiddenCollectIds || [];
         state.deletedFolderIds = state.deletedFolderIds || [];
+        if (!state.chosenFolderIds) {
+          state.chosenFolderIds = (state.folders || []).filter((f) => !f.isDefault).map((f) => f.id);
+        }
+        state.pendingFolderPick = null;
+        state.folderPickChecked = [];
         state.pendingFolderDeleteId = null;
         if (!state.libraryFolderId) state.libraryFolderId = "all";
         state.loginGate = false;

@@ -18,6 +18,8 @@ export interface DesktopApi {
     maxPerRefresh?: number;
   }) => Promise<{ ok: boolean }>;
   refresh: (opts?: { folderName?: string }) => Promise<{ ok: boolean; waiting?: boolean }>;
+  listFolders: () => Promise<{ ok: boolean; waiting?: boolean }>;
+  moveWorks: (payload: { works: { id: string; title: string; fromName: string; toName: string }[] }) => Promise<{ ok: boolean; error?: string }>;
   stopRefresh: () => Promise<{ ok: boolean }>;
   resumeRefresh: () => Promise<{ ok: boolean }>;
   download: (payload: { works: Work[]; folderNames: Record<string, string> }) => Promise<{ ok: boolean; error?: string }>;
@@ -42,6 +44,7 @@ export interface DesktopApi {
     folder?: string;
     harvested?: number;
   }) => void) => () => void;
+  onFolderPick: (cb: (data: { folders: { id: string; name: string }[] }) => void) => () => void;
   onDl: (cb: (data: Record<string, unknown>) => void) => () => void;
 }
 

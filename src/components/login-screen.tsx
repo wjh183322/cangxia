@@ -7,6 +7,7 @@ export function LoginScreen() {
   const login = useApp((s) => s.login);
   const skipLoginGate = useApp((s) => s.skipLoginGate);
   const pendingRead = useApp((s) => s.pendingReadAfterLogin);
+  const pendingList = useApp((s) => s.pendingListFoldersAfterLogin);
   const native = isDesktop();
   const [phase, setPhase] = useState<"idle" | "qr" | "ok" | "err">("idle");
   const [error, setError] = useState("");
@@ -44,9 +45,11 @@ export function LoginScreen() {
         <h1 className="mt-3 font-sans text-3xl font-semibold tracking-tight">藏匣</h1>
         <p className="mt-3 text-sm leading-relaxed text-muted">
           {native
-            ? pendingRead
-              ? "读取收藏需要先登录自己的抖音号。扫码后会继续读取。"
-              : "扫码登录自己的抖音号后，才能读取收藏。图库和已同步的清单不登录也能看。"
+            ? pendingList
+              ? "读取收藏夹需要先登录自己的抖音号。扫码后会继续读取名单。"
+              : pendingRead
+                ? "读取收藏需要先登录自己的抖音号。扫码后会继续读取。"
+                : "扫码登录自己的抖音号后，才能读取收藏。图库和已同步的清单不登录也能看。"
             : "备份当前登录号的抖音收藏图集。文件只落本机。预览使用演示数据，不会连接你的真实账号。"}
         </p>
         <div className="mt-8 flex min-h-40 items-center justify-center rounded-lg bg-raised">

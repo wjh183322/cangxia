@@ -10,6 +10,11 @@ export interface Folder {
   isDefault: boolean;
 }
 
+export interface FolderPickItem {
+  id: string;
+  name: string;
+}
+
 export interface WorkImage {
   id: string;
   url: string;

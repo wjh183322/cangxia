@@ -1,6 +1,6 @@
-import { mkdir, writeFile, copyFile, access, readFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, copyFile, access, readFile, rm, rename } from "node:fs/promises";
 import { constants } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { execFile } from "node:child_process";
 import { folderTitle, safeFolderName, workDir } from "./paths.mjs";
 
@@ -134,6 +134,41 @@ export async function readIndex(rootPath) {
   } catch {
     return { version: 1, records: [] };
   }
+}
+
+export async function relocateWorkFolder(rootPath, item) {
+  const toName = item.toName || "收藏";
+  const fromName = item.fromName || "收藏";
+  const toDir = workDir(rootPath, toName, item.title, item.id);
+  const index = await readIndex(rootPath);
+  const records = [...(index.records || [])];
+  const rec = records.find((r) => r.id === item.id);
+  const fromDir = rec?.dir || workDir(rootPath, fromName, item.title, item.id);
+  if (fromDir === toDir) return { ok: true, dir: toDir };
+  if (!(await exists(fromDir))) return { ok: true, dir: toDir, missing: true };
+  await mkdir(dirname(toDir), { recursive: true });
+  if (await exists(toDir)) return { ok: true, dir: toDir, existed: true };
+  await rename(fromDir, toDir);
+  try {
+    const metaPath = join(toDir, "meta.json");
+    if (await exists(metaPath)) {
+      const meta = JSON.parse(await readFile(metaPath, "utf8"));
+      meta.folderName = toName;
+      await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+    }
+  } catch {
+    /* ignore */
+  }
+  if (rec) {
+    rec.dir = toDir;
+    await writeIndex(rootPath, records);
+  }
+  try {
+    await writeDesktopIni(toDir);
+  } catch {
+    /* ignore */
+  }
+  return { ok: true, dir: toDir };
 }
 
 export async function deleteWorkFolders(rootPath, items) {

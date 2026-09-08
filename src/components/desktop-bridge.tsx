@@ -28,6 +28,9 @@ export function DesktopBridge() {
         });
       }
     });
+    const offPick = api.onFolderPick((data) => {
+      useApp.getState().openFolderPick(data.folders || []);
+    });
     const offCaptcha = api.onCaptcha(() => {
       const s = useApp.getState();
       if (s.captchaOpen) return;
@@ -46,6 +49,7 @@ export function DesktopBridge() {
       offStatus();
       offCount();
       offDone();
+      offPick();
       offCaptcha();
       offDl();
     };

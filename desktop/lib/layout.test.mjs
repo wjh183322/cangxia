@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ensureWorkFolder, readIndex, writeIndex, folderTitle, deleteWorkFolders, exists } from "./layout.mjs";
+import { ensureWorkFolder, readIndex, writeIndex, folderTitle, deleteWorkFolders, exists, relocateWorkFolder } from "./layout.mjs";
 import { mapAweme, collectAwemes, mergeWorks, isCollectFeedUrl, isFolderListUrl } from "./aweme.mjs";
 
 test("folderTitle strips illegal chars and keeps id", () => {
@@ -232,6 +232,35 @@ test("deleteWorkFolders removes dir and index record", async () => {
     assert.equal(await exists(result.dir), false);
     const index = await readIndex(root);
     assert.equal(index.records.length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("relocateWorkFolder moves from 收藏 to custom folder", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cangxia-move-"));
+  try {
+    const work = {
+      id: "88",
+      title: "雷电",
+      authorName: "a",
+      douyinId: "a",
+      kind: "album",
+    };
+    const result = await ensureWorkFolder({
+      rootPath: root,
+      folderName: "收藏",
+      work,
+      imageFiles: [{ name: "a.jpg", bytes: Buffer.from("fake-jpeg") }],
+    });
+    await writeIndex(root, [{ id: work.id, dir: result.dir, status: "downloaded" }]);
+    const moved = await relocateWorkFolder(root, { id: work.id, title: work.title, fromName: "收藏", toName: "雷电将军" });
+    assert.equal(await exists(result.dir), false);
+    assert.equal(await exists(moved.dir), true);
+    const meta = JSON.parse(await readFile(join(moved.dir, "meta.json"), "utf8"));
+    assert.equal(meta.folderName, "雷电将军");
+    const index = await readIndex(root);
+    assert.equal(index.records[0].dir, moved.dir);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

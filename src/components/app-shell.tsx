@@ -1,7 +1,7 @@
 import { RefreshCw, Settings, FolderClosed, X } from "lucide-react";
 import { CaptchaDialog } from "@/components/captcha-dialog";
 import { CollectView } from "@/components/collect-view";
-import { FolderDeleteDialog } from "@/components/folder-delete-dialog";
+import { FolderPickDialog } from "@/components/folder-pick-dialog";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DownloadCancelDialog } from "@/components/download-cancel-dialog";
 import { DownloadDrawer, DownloadMiniBar } from "@/components/download-drawer";
@@ -16,6 +16,7 @@ export function AppShell() {
   const tab = useApp((s) => s.tab);
   const setTab = useApp((s) => s.setTab);
   const folders = useApp((s) => s.folders);
+  const chosenFolderIds = useApp((s) => s.chosenFolderIds);
   const folderId = useApp((s) => s.folderId);
   const setFolder = useApp((s) => s.setFolder);
   const libraryFolderId = useApp((s) => s.libraryFolderId);
@@ -23,6 +24,7 @@ export function AppShell() {
   const works = useApp((s) => s.works);
   const hiddenCollectIds = useApp((s) => s.hiddenCollectIds);
   const refresh = useApp((s) => s.refresh);
+  const listFolders = useApp((s) => s.listFolders);
   const finishRefresh = useApp((s) => s.finishRefresh);
   const job = useApp((s) => s.job);
   const setSettingsOpen = useApp((s) => s.setSettingsOpen);
@@ -69,6 +71,9 @@ export function AppShell() {
               停止（已读 {syncCount.works}）
             </Button>
           )}
+          <Button size="sm" variant="secondary" onClick={() => void listFolders()} disabled={job.active && !syncingBrowser}>
+            读取收藏夹
+          </Button>
           <Button size="sm" variant="secondary" onClick={() => void refresh()} disabled={job.active && !syncingBrowser}>
             <RefreshCw className={`size-4 ${job.active ? "animate-spin" : ""}`} />
             读取收藏
@@ -139,7 +144,9 @@ export function AppShell() {
                 </span>
               </button>
             )}
-            {folders.map((folder) => {
+            {folders
+              .filter((folder) => folder.isDefault || chosenFolderIds.includes(folder.id) || chosenFolderIds.includes(folder.name))
+              .map((folder) => {
               const count =
                 tab === "library"
                   ? works.filter(
@@ -195,6 +202,7 @@ export function AppShell() {
       <Viewer />
       <DeleteConfirmDialog />
       <FolderDeleteDialog />
+      <FolderPickDialog />
       <DownloadCancelDialog />
       <DownloadDrawer />
     </div>

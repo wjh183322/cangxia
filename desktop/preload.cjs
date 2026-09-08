@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("cangxia", {
   pickRoot: () => ipcRenderer.invoke("cangxia:pick-root"),
   setSettings: (s) => ipcRenderer.invoke("cangxia:set-settings", s),
   refresh: (opts) => ipcRenderer.invoke("cangxia:refresh", opts || {}),
+  listFolders: () => ipcRenderer.invoke("cangxia:list-folders"),
+  moveWorks: (payload) => ipcRenderer.invoke("cangxia:move-works", payload || {}),
   stopRefresh: () => ipcRenderer.invoke("cangxia:stop-refresh"),
   resumeRefresh: () => ipcRenderer.invoke("cangxia:resume-refresh"),
   download: (payload) => ipcRenderer.invoke("cangxia:download", payload),
@@ -41,6 +43,11 @@ contextBridge.exposeInMainWorld("cangxia", {
     const fn = (_e, data) => cb(data);
     ipcRenderer.on("cangxia:refresh-done", fn);
     return () => ipcRenderer.removeListener("cangxia:refresh-done", fn);
+  },
+  onFolderPick: (cb) => {
+    const fn = (_e, data) => cb(data);
+    ipcRenderer.on("cangxia:folder-pick", fn);
+    return () => ipcRenderer.removeListener("cangxia:folder-pick", fn);
   },
   onDl: (cb) => {
     const fn = (_e, data) => cb(data);

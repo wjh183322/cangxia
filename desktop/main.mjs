@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell, Menu, protocol } from "electron";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readIndex, deleteWorkFolders, workDir } from "./lib/layout.mjs";
+import { readIndex, deleteWorkFolders, workDir, relocateWorkFolder } from "./lib/layout.mjs";
 import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, unwrapAweme } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
@@ -371,11 +371,7 @@ function ingestPayload(url, json) {
       refreshReading = false;
       break;
     }
-    const custom = folders.find((f) => f.id === String(aweme.collects_id || inner.collects_id || "") && !f.isDefault);
-    const folder =
-      reading !== "收藏"
-        ? ensureFolder(reading, readingCollectsId)
-        : custom || defaultFolder();
+    const folder = reading !== "收藏" ? ensureFolder(reading, readingCollectsId) : defaultFolder();
     const work = mapAweme(aweme, folder);
     if (!work.id) continue;
     if (folder && !folder.isDefault) {
@@ -433,7 +429,11 @@ async function snapshotWorks() {
       if (downloaded.has(w.id)) w.status = "downloaded";
     }
   }
-  return { folders, works };
+  const snapFolders =
+    readingFolderName && readingFolderName !== "收藏"
+      ? folders.filter((f) => f.isDefault || f.name === readingFolderName)
+      : folders.filter((f) => f.isDefault);
+  return { folders: snapFolders, works };
 }
 
 async function completeRefresh() {
@@ -840,9 +840,7 @@ async function harvestMcp(win, ctx) {
     replayFolderBuffer();
     await drainPageFeeds(win);
   } else {
-    const gotFav = await harvestByIntercept(win, ctx);
-    await harvestFolderNames(win);
-    return gotFav;
+    return harvestByIntercept(win, ctx);
   }
   const got = await harvestByIntercept(win, ctx);
   if (!got) {
@@ -1522,6 +1520,55 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
     }
   })();
   return { ok: true, waiting: true };
+});
+
+ipcMain.handle("cangxia:list-folders", async () => {
+  refreshStop = false;
+  refreshPaused = false;
+  const win = openDouyinWindow("https://www.douyin.com/user/self?showTab=favorite_collection", { forRefresh: true });
+  void attachNetwork(win);
+  openProgressWindow();
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: 1,
+    message: "正在读取自建收藏夹名单，还不导入",
+  });
+  void (async () => {
+    try {
+      folders = folders.filter((f) => f.isDefault);
+      refreshReading = true;
+      readingFolderName = "";
+      await waitPageReady(win, "雷电将军");
+      await harvestFolderNames(win);
+      const list = folders
+        .filter((f) => !f.isDefault)
+        .map((f) => ({ id: f.id, name: f.name }));
+      send("cangxia:folder-pick", { folders: list });
+      lastHarvestMethod = list.length ? `读到 ${list.length} 个收藏夹，请勾选` : "没读到自建收藏夹";
+      lastHarvestCount = list.length;
+    } finally {
+      refreshReading = false;
+      closeProgressWindow();
+      send("cangxia:progress", { active: false, current: 0, total: 0, message: "" });
+      if (win && !win.isDestroyed()) win.close();
+    }
+  })();
+  return { ok: true, waiting: true };
+});
+
+ipcMain.handle("cangxia:move-works", async (_e, payload = {}) => {
+  const rootPath = settings.rootPath;
+  if (!rootPath) return { ok: false, error: "未选择下载根目录" };
+  const items = Array.isArray(payload.works) ? payload.works : [];
+  for (const item of items) {
+    try {
+      await relocateWorkFolder(rootPath, item);
+    } catch {
+      /* keep going */
+    }
+  }
+  return { ok: true };
 });
 
 ipcMain.handle("cangxia:stop-refresh", async () => {
