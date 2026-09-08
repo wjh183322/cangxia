@@ -65,7 +65,7 @@ export function LibraryView() {
 
   const filtered = useMemo(() => {
     const rank = (w: Work) =>
-      libraryFolderId === "all" ? (w.allIndex ?? 1e12) : (w.listIndex ?? 1e12);
+      libraryFolderId === "default" || libraryFolderId === "all" ? (w.allIndex ?? 1e12) : (w.listIndex ?? 1e12);
     return downloaded
       .filter((w) => !filterAuthor || w.authorName.includes(filterAuthor))
       .filter((w) => !filterDouyin || w.douyinId.includes(filterDouyin))
