@@ -14,25 +14,3 @@ export function looksLikeCaptcha(url) {
   const captchaPath = /\/captcha\/|\/slide\/verify|\/puzzle\/|\/verify\/(get|captcha)/i.test(path);
   return captchaHost && captchaPath;
 }
-
-export const OPEN_QR_SCRIPT = `(() => {
-  const text = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
-  const visible = (el) => {
-    if (!el) return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 8 && r.height > 8;
-  };
-  const nodes = [...document.querySelectorAll("button, a, span, div, p, li")];
-  if (document.querySelector("img[src*='qrcode'], img[src*='qr'], canvas")) return "has-qr";
-  const qrTab = nodes.find((el) => visible(el) && (text(el) === "扫码登录" || text(el) === "二维码登录"));
-  if (qrTab) {
-    qrTab.click();
-    return "qr-tab";
-  }
-  const login = nodes.find((el) => visible(el) && text(el) === "登录" && el.childElementCount <= 3);
-  if (login) {
-    login.click();
-    return "login";
-  }
-  return "none";
-})()`;

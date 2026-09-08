@@ -1,14 +1,22 @@
-import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell, Menu } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell, Menu, protocol } from "electron";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readIndex, deleteWorkFolders, workDir } from "./lib/layout.mjs";
 import { collectAwemes, mapAweme, mapFolder } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
-import { looksLikeCaptcha, OPEN_QR_SCRIPT } from "./lib/captcha.mjs";
+import { looksLikeCaptcha } from "./lib/captcha.mjs";
+import { APP_SCHEMES, CHROME_UA, LOGIN_PAGE_SCRIPT, isHttpUrl } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
+
+protocol.registerSchemesAsPrivileged(
+  APP_SCHEMES.map((scheme) => ({
+    scheme,
+    privileges: { standard: true, supportFetchAPI: true, bypassCSP: true },
+  })),
+);
 
 let mainWindow = null;
 let douyinWindow = null;
@@ -21,7 +29,6 @@ let refreshPaused = false;
 let loginWaiting = false;
 let captchaLock = false;
 let lastCaptchaNotify = 0;
-let qrAssistGen = 0;
 
 function send(channel, payload) {
   mainWindow?.webContents.send(channel, payload);
@@ -63,6 +70,37 @@ function createMainWindow() {
 
 function douyinSession() {
   return session.fromPartition(PARTITION);
+}
+
+function blockAppSchemes(ses) {
+  for (const scheme of APP_SCHEMES) {
+    try {
+      ses.protocol.handle(scheme, () => new Response("", { status: 204 }));
+    } catch {
+      /* already registered */
+    }
+  }
+  ses.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission === "openExternal") {
+      callback(false);
+      return;
+    }
+    callback(true);
+  });
+}
+
+function hardenContents(contents) {
+  contents.setUserAgent(CHROME_UA);
+  contents.setWindowOpenHandler(({ url }) => (isHttpUrl(url) ? { action: "allow" } : { action: "deny" }));
+  contents.on("will-navigate", (e, url) => {
+    if (!isHttpUrl(url)) e.preventDefault();
+  });
+  contents.on("will-redirect", (e, url) => {
+    if (!isHttpUrl(url)) e.preventDefault();
+  });
+  contents.on("will-frame-navigate", (e) => {
+    if (e.url && !isHttpUrl(e.url)) e.preventDefault();
+  });
 }
 
 function isLoggedInCookies(cookies) {
@@ -188,49 +226,33 @@ function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false }
   if (douyinWindow && !douyinWindow.isDestroyed()) {
     douyinWindow.focus();
     void douyinWindow.loadURL(path);
-    if (assistQr) startQrAssist(douyinWindow);
     return douyinWindow;
   }
   douyinWindow = new BrowserWindow({
-    width: 980,
-    height: 760,
+    width: assistQr ? 560 : 980,
+    height: assistQr ? 760 : 760,
     title: assistQr ? "抖音扫码登录" : "抖音登录 / 收藏",
     parent: mainWindow || undefined,
+    autoHideMenuBar: true,
     webPreferences: {
       partition: PARTITION,
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+  hardenContents(douyinWindow.webContents);
   void attachNetwork(douyinWindow);
-  douyinWindow.webContents.on("did-finish-load", () => {
-    if (loginWaiting) startQrAssist(douyinWindow);
+  douyinWindow.webContents.on("dom-ready", () => {
+    if (loginWaiting || assistQr) {
+      void douyinWindow.webContents.executeJavaScript(LOGIN_PAGE_SCRIPT).catch(() => {});
+    }
   });
-  void douyinWindow.loadURL(path);
+  void douyinWindow.loadURL(path, { userAgent: CHROME_UA });
   douyinWindow.on("closed", () => {
     douyinWindow = null;
     loginWaiting = false;
   });
   return douyinWindow;
-}
-
-function startQrAssist(win) {
-  const gen = ++qrAssistGen;
-  let tries = 0;
-  const tick = async () => {
-    if (gen !== qrAssistGen) return;
-    if (!win || win.isDestroyed() || !loginWaiting) return;
-    tries += 1;
-    if (tries > 25) return;
-    try {
-      const result = await win.webContents.executeJavaScript(OPEN_QR_SCRIPT);
-      if (result === "has-qr") return;
-    } catch {
-      return;
-    }
-    setTimeout(tick, 700);
-  };
-  setTimeout(tick, 400);
 }
 
 ipcMain.handle("cangxia:login", async () => {
@@ -428,6 +450,9 @@ function sleep(ms) {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
+  blockAppSchemes(session.defaultSession);
+  blockAppSchemes(douyinSession());
+  app.on("web-contents-created", (_e, contents) => hardenContents(contents));
   createMainWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
