@@ -12,3 +12,5 @@ screenshots/
 .env
 .env.*
 .cangxia/
+desktop/ui/
+desktop/dist-win/

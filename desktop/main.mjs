@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell, Menu } from "electron";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readIndex, deleteWorkFolders, workDir } from "./lib/layout.mjs";
@@ -22,12 +22,20 @@ function send(channel, payload) {
   mainWindow?.webContents.send(channel, payload);
 }
 
+function uiIndex() {
+  return join(__dirname, "ui", "index.html");
+}
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    minWidth: 960,
+    minHeight: 640,
     backgroundColor: "#0c0c0d",
     title: "藏匣",
+    autoHideMenuBar: true,
+    show: false,
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -35,8 +43,17 @@ function createMainWindow() {
       sandbox: true,
     },
   });
-  const url = process.env.CANGXIA_URL || "http://127.0.0.1:8080/";
-  void mainWindow.loadURL(url);
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  const fromEnv = process.env.CANGXIA_URL;
+  if (fromEnv) {
+    void mainWindow.loadURL(fromEnv);
+    return;
+  }
+  const index = uiIndex();
+  void mainWindow.loadFile(index).catch(() => {
+    dialog.showErrorBox("藏匣", "界面文件缺失。请先在项目根目录执行 npm run build:desktop。");
+  });
 }
 
 function douyinSession() {
@@ -358,6 +375,7 @@ function sleep(ms) {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   createMainWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

@@ -8,7 +8,9 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test lib/*.test.mjs",
-    "pack:win": "electron-builder --win nsis --x64"
+    "build:ui": "npm --prefix .. run build:desktop",
+    "pack:win": "npm run build:ui && electron-builder --win nsis zip --x64",
+    "pack:win:zip": "electron-builder --win zip --x64"
   },
   "author": "藏匣",
   "devDependencies": {
@@ -18,10 +20,13 @@
   "build": {
     "appId": "com.cangxia.app",
     "productName": "藏匣",
-    "files": ["main.mjs", "preload.cjs", "lib/**"],
+    "files": ["main.mjs", "preload.cjs", "lib/**", "ui/**"],
     "directories": { "output": "dist-win" },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "zip", "arch": ["x64"] }
+      ]
     },
     "nsis": {
       "oneClick": false,

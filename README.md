@@ -19,7 +19,8 @@
 当前是界面 + Windows 本机层源码。演示用的封面/视频体积较大，**没有放进本仓库**。预览里的演示数据在 `src/lib/demo-data.ts`。
 
 - `src/`：界面（收藏、图库、浏览、下载管理、设置）  
-- `desktop/`：Electron 本机（扫码登录、刷新收藏、下载落盘、验证码通知）  
+- `desktop/`：Windows 本机程序（扫码登录、刷新收藏、下载落盘、验证码通知）  
+- `desktop/ui/`：打包进 exe 的界面（由 `npm run build:desktop` 生成，不进 git）  
 
 ## 使用注意
 
@@ -29,27 +30,17 @@
 
 ## 开发
 
-界面（需本机已装依赖）：
+本对话里的预览仍是网页，方便改界面。Windows 正式版把同一套界面打进 exe，系统标题栏，不打开浏览器。
 
 ```bash
 npm install
-npm run dev
-```
-
-Windows 本机层：
-
-```bash
+npm run build:desktop
 cd desktop
 npm install
 npm start
 ```
 
-打包安装包（在 Windows 上）：
-
-```bash
-cd desktop
-npm run pack:win
-```
+完整步骤见 [部署说明.md](./部署说明.md)。
 
 ## 许可
 
