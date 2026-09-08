@@ -2,11 +2,11 @@ import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell,
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readIndex, deleteWorkFolders, workDir } from "./lib/layout.mjs";
-import { collectAwemes, isCollectFeedUrl, mapAweme, mapFolder } from "./lib/aweme.mjs";
+import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, SCROLL_FEED_SCRIPT, LIST_SIDE_FOLDERS_SCRIPT, clickSideFolderScript, INSTALL_FOLDER_WATCH_SCRIPT, isHttpUrl } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, SCROLL_FEED_SCRIPT, clickSideFolderScript, installFolderWatchScript, isHttpUrl } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -235,36 +235,68 @@ async function attachNetwork(win) {
   });
 }
 
+function defaultFolder() {
+  return folders.find((f) => f.isDefault) || folders[0] || { id: "default", name: "收藏", isDefault: true };
+}
+
+function ensureFolder(name, id) {
+  if (!name || name === "收藏") return defaultFolder();
+  const sid = id ? String(id) : "";
+  const hit = folders.find((f) => (sid && f.id === sid) || f.name === name);
+  if (hit) {
+    if (sid && hit.id !== sid && String(hit.id).startsWith("folder_")) {
+      folders = folders.map((f) => (f === hit ? { ...f, id: sid } : f));
+      return folders.find((f) => f.name === name);
+    }
+    return hit;
+  }
+  const folder = { id: sid || `folder_${name}`, name, isDefault: false };
+  folders = [...folders, folder];
+  return folder;
+}
+
 function ingestPayload(url, json) {
-  if (/collects\/list|collection\/list/i.test(url)) {
-    const data = json.data || json;
-    const list = data.collects_list || data.list || [];
-    if (Array.isArray(list) && list.length) {
-      folders = list.map((raw, i) => mapFolder(raw, i));
-      if (!folders.some((f) => f.isDefault)) {
-        folders = [{ id: "default", name: "收藏", isDefault: true }, ...folders];
+  if (isFolderListUrl(url)) {
+    const list = (json.data || json).collects_list;
+    if (Array.isArray(list)) {
+      for (const [i, raw] of list.entries()) {
+        const mapped = mapFolder(raw, i);
+        if (!mapped.name || mapped.isDefault) continue;
+        if (/^(视频|音乐|合集|短剧|收藏夹|话题|特效)$/.test(mapped.name)) continue;
+        ensureFolder(mapped.name, mapped.id);
       }
     }
   }
   if (!refreshReading) return;
   if (!isCollectFeedUrl(url)) return;
   const awemes = collectAwemes(json);
+  const reading = readingFolderName || "收藏";
   for (const aweme of awemes) {
-    const folder = folders.find((f) => f.id === String(aweme.collects_id || "")) || folders[0];
+    const custom = folders.find((f) => f.id === String(aweme.collects_id || "") && !f.isDefault);
+    const folder =
+      reading !== "收藏"
+        ? ensureFolder(reading, aweme.collects_id || custom?.id)
+        : custom || defaultFolder();
     const work = mapAweme(aweme, folder);
     if (!work.id) continue;
+    if (folder && !folder.isDefault) {
+      work.alsoInFolderIds = [...new Set([...(work.alsoInFolderIds || []), "default"])];
+    }
     const prev = captured.get(work.id);
     if (prev) {
       work.listIndex = prev.listIndex;
       work.allIndex = prev.allIndex;
-      if (readingFolderName === "收藏") work.allIndex = prev.allIndex ?? captured.size;
-      if (prev.folderId !== work.folderId) {
-        work.alsoInFolderIds = [...new Set([...(prev.alsoInFolderIds || []), prev.folderId])];
+      if (reading === "收藏") work.allIndex = prev.allIndex ?? captured.size;
+      const keepCustom = prev.folderId && prev.folderId !== "default" && reading === "收藏";
+      if (keepCustom) {
         work.folderId = prev.folderId;
+        work.alsoInFolderIds = [...new Set([...(prev.alsoInFolderIds || []), ...work.alsoInFolderIds, "default"])];
+      } else if (prev.folderId !== work.folderId) {
+        work.alsoInFolderIds = [...new Set([...(prev.alsoInFolderIds || []), prev.folderId, ...work.alsoInFolderIds])];
       }
     } else {
       work.listIndex = captured.size;
-      if (readingFolderName === "收藏") work.allIndex = captured.size;
+      if (reading === "收藏") work.allIndex = captured.size;
     }
     captured.set(work.id, work);
   }
@@ -432,7 +464,7 @@ async function watchAndRead(win, max) {
   while (win && !win.isDestroyed() && !refreshStop) {
     let state = { view: "other", name: "" };
     try {
-      state = await win.webContents.executeJavaScript(INSTALL_FOLDER_WATCH_SCRIPT);
+      state = await win.webContents.executeJavaScript(installFolderWatchScript(folders.map((f) => f.name)));
     } catch {
       break;
     }
@@ -449,11 +481,11 @@ async function watchAndRead(win, max) {
       if (yes) {
         refreshReading = true;
         readingFolderName = state.name || "收藏";
-        const folder = folders.find((f) => f.name === state.name);
-        const started = folder ? countInFolder(folder.id) : captured.size;
+        const folder = ensureFolder(readingFolderName);
+        const started = countInFolder(folder.id);
         await scrollUntilCap(win, {
-          folderId: folder?.id || (state.name === "收藏" ? "default" : null),
-          folderName: state.name,
+          folderId: folder.id,
+          folderName: readingFolderName,
           max,
           started,
         });
@@ -510,7 +542,7 @@ function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false, 
   });
   douyinWindow.webContents.on("did-finish-load", () => {
     if (!loginWaiting) {
-      void douyinWindow.webContents.executeJavaScript(INSTALL_FOLDER_WATCH_SCRIPT).catch(() => {});
+      void douyinWindow.webContents.executeJavaScript(installFolderWatchScript(folders.map((f) => f.name))).catch(() => {});
     }
   });
   void douyinWindow.loadURL(path, { userAgent: CHROME_UA });

@@ -261,34 +261,45 @@ export function clickSideFolderScript(name) {
   })()`;
 }
 
-export const INSTALL_FOLDER_WATCH_SCRIPT = `(() => {
+export function installFolderWatchScript(knownNames = []) {
+  const known = JSON.stringify(["收藏", ...[...new Set(knownNames)].filter((n) => n && n !== "收藏")]);
+  return `(() => {
+  const known = ${known};
   const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
-  if (!window.__cangxiaWatch) {
-    window.__cangxiaWatch = { view: "other", name: "" };
+  const skip = /^(作品|推荐|喜欢|收藏|收藏夹|视频|音乐|合集|短剧|话题|特效|精选|关注|朋友|我的|直播|批量管理|新建收藏夹|观看历史|稍后再看|我的预约|我的收藏夹)$/;
+  if (!window.__cangxiaWatch) window.__cangxiaWatch = { view: "other", name: "" };
+  if (!window.__cangxiaWatchBound) {
+    window.__cangxiaWatchBound = true;
     document.addEventListener("click", (e) => {
       let n = e.target;
-      for (let i = 0; i < 7 && n; i += 1) {
-        const t = textOf(n);
-        if (t === "作品" || t === "推荐" || t === "喜欢" || t === "观看历史" || t === "稍后再看") {
+      let best = "";
+      for (let i = 0; i < 8 && n; i += 1) {
+        const raw = textOf(n);
+        if (!raw || raw.length > 36) {
+          n = n.parentElement;
+          continue;
+        }
+        if (raw === "作品" || raw === "推荐" || raw === "喜欢" || raw === "观看历史" || raw === "稍后再看") {
           window.__cangxiaWatch = { view: "other", name: "" };
           return;
         }
-        if (t === "收藏") {
-          window.__cangxiaWatch = { view: "favorite", name: "收藏" };
-          return;
+        if (raw === "收藏") {
+          if (!best) best = "收藏";
+          n = n.parentElement;
+          continue;
         }
-        if (t && !/新建收藏夹|^收藏夹$|^视频$|^音乐$|^合集$|^短剧$|^批量管理$/.test(t)) {
-          const r = n.getBoundingClientRect ? n.getBoundingClientRect() : null;
-          if (r && r.left < 520 && r.top > 140 && t.length < 28) {
-            const name = t.replace(/\\d{1,5}$/, "").trim();
-            if (name) {
-              window.__cangxiaWatch = { view: "folder", name };
-              return;
-            }
-          }
+        const t = raw.replace(/\\d{1,6}$/, "").trim();
+        const knownHit = known.find((k) => k !== "收藏" && (t === k || t.startsWith(k)));
+        if (knownHit) best = knownHit;
+        else if (t && !skip.test(t) && t.length >= 2 && t.length <= 24 && t.length >= best.length && best !== "收藏") {
+          best = t;
+        } else if (t && !skip.test(t) && t.length >= 2 && t.length <= 24 && !best) {
+          best = t;
         }
         n = n.parentElement;
       }
+      if (best === "收藏") window.__cangxiaWatch = { view: "favorite", name: "收藏" };
+      else if (best) window.__cangxiaWatch = { view: "folder", name: best };
     }, true);
   }
   const nodes = [...document.querySelectorAll("span, div, a, button, p")];
@@ -299,17 +310,10 @@ export const INSTALL_FOLDER_WATCH_SCRIPT = `(() => {
   if (hasCollects && window.__cangxiaWatch.view === "other") {
     window.__cangxiaWatch = { view: "favorite", name: "收藏" };
   }
-  if (!hasCollects && window.__cangxiaWatch.view !== "other") {
-    const works = nodes.find((el) => textOf(el) === "作品");
-    if (works) {
-      const c = getComputedStyle(works).color || "";
-      const m = c.match(/rgba?\\((\\d+),\\s*(\\d+)/);
-      if (m && Number(m[1]) > 180 && Number(m[2]) < 90) {
-        window.__cangxiaWatch = { view: "other", name: "" };
-      }
-    }
-  }
   return window.__cangxiaWatch;
 })()`;
+}
+
+export const INSTALL_FOLDER_WATCH_SCRIPT = installFolderWatchScript();
 
 

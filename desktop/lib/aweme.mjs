@@ -183,6 +183,11 @@ export function isCollectFeedUrl(url) {
   return /listcollection|collects\/|favorite|\/web\/collect|aweme\/list/i.test(u);
 }
 
+export function isFolderListUrl(url) {
+  const u = String(url || "");
+  return /\/collects\/list\/?(?:\?|$)/i.test(u) && !/video\/list/i.test(u);
+}
+
 export function mergeWorks(existing, incoming) {
   const byId = new Map(existing.map((w) => [w.id, w]));
   return incoming.map((w) => {
