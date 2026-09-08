@@ -529,13 +529,15 @@ export const useApp = create<AppState>()(
           const folderName = get().folders.find((f) => f.id === get().folderId)?.name || "收藏";
           const works = get().works;
           const folderId = get().folderId;
+          const hidden = new Set(get().hiddenCollectIds || []);
+          const visible = works.filter((w) => !hidden.has(w.id));
           const knownIds =
             folderName === "收藏"
-              ? works.filter((w) => w.allIndex != null).map((w) => w.id)
-              : works.filter((w) => inFolder(w, folderId)).map((w) => w.id);
-          const startAllIndex = works.reduce((m, w) => Math.max(m, w.allIndex ?? -1), -1) + 1;
+              ? visible.filter((w) => w.allIndex != null).map((w) => w.id)
+              : visible.filter((w) => inFolder(w, folderId)).map((w) => w.id);
+          const startAllIndex = visible.reduce((m, w) => Math.max(m, w.allIndex ?? -1), -1) + 1;
           const startListIndex =
-            works.filter((w) => inFolder(w, folderId)).reduce((m, w) => Math.max(m, w.listIndex ?? -1), -1) + 1;
+            visible.filter((w) => inFolder(w, folderId)).reduce((m, w) => Math.max(m, w.listIndex ?? -1), -1) + 1;
           set({
             job: {
               active: true,
