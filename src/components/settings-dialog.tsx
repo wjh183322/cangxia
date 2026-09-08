@@ -57,7 +57,7 @@ export function SettingsDialog() {
             />
           </label>
           <label className="block text-sm">
-            收藏夹单次读取数
+            每次新增条数
             <input
               className="mt-1 h-11 w-full rounded-md border border-line bg-raised px-3 text-sm"
               type="number"
@@ -67,7 +67,7 @@ export function SettingsDialog() {
               onChange={(e) => patchSettings({ maxPerRefresh: Math.max(1, Number(e.target.value) || 1) })}
             />
             <span className="mt-1 block text-xs text-muted">
-              只读你当前点开确认的那一个夹，不会一次读完所有夹。最少 1 条。下次再读同一夹会跳过已有的，继续往下。
+              只读当前左侧这个夹。填 10 就是再收下 10 条没见过的；已经在清单里的会跳过，不用自己算「已有 N 再读 N+M」。
             </span>
           </label>
         </div>

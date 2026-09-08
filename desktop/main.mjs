@@ -45,6 +45,8 @@ let lastHarvestMethod = "";
 let lastHarvestCount = 0;
 let lastHarvestError = "";
 let netTrace = [];
+let knownSkip = new Set();
+let skipCount = 0;
 
 function shortUrl(url) {
   const s = String(url || "");
@@ -366,6 +368,10 @@ function ingestPayload(url, json) {
   for (const aweme of awemes) {
     const inner = unwrapAweme(aweme) || aweme;
     const id = String(inner.aweme_id || inner.id || aweme.aweme_id || "");
+    if (id && knownSkip.has(id)) {
+      skipCount += 1;
+      continue;
+    }
     const isNew = id && !captured.has(id);
     if (isNew && countProgress(readingFolderId, reading, readingStarted) >= cap) {
       refreshReading = false;
@@ -994,12 +1000,12 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
 async function harvestByIntercept(win, { folderId, folderName, max, started }) {
   refreshReading = true;
   readingInside = true;
-  const deadline = Date.now() + 45000;
+  const deadline = Date.now() + Math.min(180000, 60000 + knownSkip.size * 150);
   send("cangxia:progress", {
     active: true,
     current: 0,
     total: max,
-    message: `正在读取「${folderName}」 0/${max}`,
+    message: `正在读取「${folderName}」新增 0/${max}`,
   });
   await drainPageFeeds(win);
   let got = countProgress(folderId, folderName, started);
@@ -1007,6 +1013,7 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
   got = countProgress(folderId, folderName, started);
   if (got >= max) return got;
   let idle = 0;
+  let lastSkip = skipCount;
   while (win && !win.isDestroyed() && !refreshStop) {
     while (refreshPaused && !refreshStop) await sleep(400);
     if (refreshStop || !win || win.isDestroyed() || Date.now() > deadline) break;
@@ -1015,11 +1022,12 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
       active: true,
       current: Math.min(got, max),
       total: max,
-      message: `正在读取「${folderName}」 ${got}/${max}`,
+      message: `正在读取「${folderName}」新增 ${got}/${max}${skipCount ? `，已跳过 ${skipCount}` : ""}`,
     });
     if (got >= max) break;
     if (!readingHasMore && got > 0) break;
     const before = got;
+    const skipBefore = skipCount;
     await drainPageFeeds(win);
     await wheelBurst(win);
     await drainPageFeeds(win);
@@ -1027,9 +1035,11 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
     await drainPageFeeds(win);
     got = countProgress(folderId, folderName, started);
     if (got >= max) break;
-    if (grew) idle = 0;
+    if (grew || skipCount > skipBefore || skipCount > lastSkip) idle = 0;
     else idle += 1;
-    if (idle >= 3) break;
+    lastSkip = skipCount;
+    if (idle >= 4 && got > 0) break;
+    if (idle >= 8) break;
   }
   return countProgress(folderId, folderName, started);
 }
@@ -1480,6 +1490,8 @@ ipcMain.handle("cangxia:set-settings", async (_e, next) => {
 
 ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   captured.clear();
+  knownSkip = new Set((opts.knownIds || []).map((id) => String(id)));
+  skipCount = 0;
   refreshStop = false;
   refreshPaused = false;
   refreshReading = false;
@@ -1496,7 +1508,7 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
     active: true,
     current: 0,
     total: max,
-    message: `不用点收藏夹，正在用接口读「${folderName}」`,
+    message: `「${folderName}」本次新增 ${max} 条，已有的会跳过`,
   });
   void (async () => {
     try {
@@ -1504,8 +1516,12 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
       readingFolderName = folderName;
       readingFolderId = folder.id;
       readingMax = max;
-      readingStarted = countInFolder(folder.id);
+      readingStarted = 0;
       readingPattern = folderName === "收藏" ? "listcollection" : "collects/video/list";
+      readingOrder =
+        folderName === "收藏"
+          ? Math.max(0, Number(opts.startAllIndex) || 0)
+          : Math.max(0, Number(opts.startListIndex) || 0);
       refreshReading = true;
       await sleep(1200);
       await scrollUntilCap(win, {

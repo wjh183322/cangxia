@@ -17,7 +17,12 @@ export interface DesktopApi {
     wxpusherSpt?: string;
     maxPerRefresh?: number;
   }) => Promise<{ ok: boolean }>;
-  refresh: (opts?: { folderName?: string }) => Promise<{ ok: boolean; waiting?: boolean }>;
+  refresh: (opts?: {
+    folderName?: string;
+    knownIds?: string[];
+    startAllIndex?: number;
+    startListIndex?: number;
+  }) => Promise<{ ok: boolean; waiting?: boolean }>;
   listFolders: () => Promise<{ ok: boolean; waiting?: boolean }>;
   moveWorks: (payload: { works: { id: string; title: string; fromName: string; toName: string }[] }) => Promise<{ ok: boolean; error?: string }>;
   stopRefresh: () => Promise<{ ok: boolean }>;

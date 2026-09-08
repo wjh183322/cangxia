@@ -527,16 +527,25 @@ export const useApp = create<AppState>()(
         if (api) {
           await api.setSettings(get().settings);
           const folderName = get().folders.find((f) => f.id === get().folderId)?.name || "收藏";
+          const works = get().works;
+          const folderId = get().folderId;
+          const knownIds =
+            folderName === "收藏"
+              ? works.filter((w) => w.allIndex != null).map((w) => w.id)
+              : works.filter((w) => inFolder(w, folderId)).map((w) => w.id);
+          const startAllIndex = works.reduce((m, w) => Math.max(m, w.allIndex ?? -1), -1) + 1;
+          const startListIndex =
+            works.filter((w) => inFolder(w, folderId)).reduce((m, w) => Math.max(m, w.listIndex ?? -1), -1) + 1;
           set({
             job: {
               active: true,
               current: 0,
               total: Math.max(1, get().settings.maxPerRefresh || 300),
-              message: `不用点抖音，正在用接口读「${folderName}」`,
+              message: `「${folderName}」本次新增 ${get().settings.maxPerRefresh || 300} 条，已有的会跳过`,
             },
             syncingBrowser: true,
           });
-          await api.refresh({ folderName });
+          await api.refresh({ folderName, knownIds, startAllIndex, startListIndex });
           return;
         }
         set({ job: { active: true, current: 0, total: 1, message: "正在同步收藏清单…" } });
@@ -854,9 +863,6 @@ async function wait(ms: number) {
 }
 
 function mergeIncoming(existing: Work[], incoming: Work[]) {
-  const incomingIds = new Set(incoming.map((w) => w.id));
-  const harvestedAll = incoming.some((w) => w.allIndex != null);
-  const harvestedFolders = new Set(incoming.map((w) => w.folderId).filter((id) => id && id !== "default"));
   const byId = new Map(existing.map((w) => [w.id, w]));
   for (const w of incoming) {
     const prev = byId.get(w.id);
@@ -875,25 +881,6 @@ function mergeIncoming(existing: Work[], incoming: Work[]) {
       listIndex: w.listIndex ?? prev.listIndex,
       allIndex: w.allIndex ?? prev.allIndex,
     });
-  }
-  for (const prev of existing) {
-    if (incomingIds.has(prev.id)) continue;
-    let listIndex = prev.listIndex;
-    let allIndex = prev.allIndex;
-    let changed = false;
-    if (harvestedAll && prev.allIndex != null) {
-      allIndex = prev.allIndex + 1_000_000;
-      changed = true;
-    }
-    if (harvestedFolders.has(prev.folderId)) {
-      listIndex = (prev.listIndex ?? 0) + 1_000_000;
-      changed = true;
-    }
-    if (!changed) continue;
-    const cur = byId.get(prev.id);
-    if (!cur) continue;
-    const next = prev.status === "downloaded" ? { ...cur, status: "stale" as const } : cur;
-    byId.set(prev.id, { ...next, listIndex, allIndex });
   }
   return [...byId.values()];
 }
