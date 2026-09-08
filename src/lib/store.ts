@@ -504,16 +504,17 @@ export const useApp = create<AppState>()(
         const api = desktop();
         if (api) {
           await api.setSettings(get().settings);
+          const folderName = get().folders.find((f) => f.id === get().folderId)?.name || "收藏";
           set({
             job: {
               active: true,
               current: 0,
               total: Math.max(1, get().settings.maxPerRefresh || 300),
-              message: "请在打开的抖音里点进「收藏」或某个收藏夹",
+              message: `不用点抖音，正在用接口读「${folderName}」`,
             },
             syncingBrowser: true,
           });
-          await api.refresh();
+          await api.refresh({ folderName });
           return;
         }
         set({ job: { active: true, current: 0, total: 1, message: "正在同步收藏清单…" } });

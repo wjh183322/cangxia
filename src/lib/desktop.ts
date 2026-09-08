@@ -17,7 +17,7 @@ export interface DesktopApi {
     wxpusherSpt?: string;
     maxPerRefresh?: number;
   }) => Promise<{ ok: boolean }>;
-  refresh: () => Promise<{ ok: boolean; waiting?: boolean }>;
+  refresh: (opts?: { folderName?: string }) => Promise<{ ok: boolean; waiting?: boolean }>;
   stopRefresh: () => Promise<{ ok: boolean }>;
   resumeRefresh: () => Promise<{ ok: boolean }>;
   download: (payload: { works: Work[]; folderNames: Record<string, string> }) => Promise<{ ok: boolean; error?: string }>;

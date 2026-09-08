@@ -96,7 +96,7 @@ export function CollectView() {
 
       <div className="min-h-0 flex-1 overflow-auto p-4">
         {list.length === 0 ? (
-          <p className="py-16 text-center text-sm text-muted">这个列表是空的。点右上角「读取收藏」同步。</p>
+          <p className="py-16 text-center text-sm text-muted">这个列表是空的。左侧选好收藏夹，点右上角「读取收藏」，不用在抖音里点夹。</p>
         ) : (
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {list.map((work, index) => {

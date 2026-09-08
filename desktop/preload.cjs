@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld("cangxia", {
   account: () => ipcRenderer.invoke("cangxia:account"),
   pickRoot: () => ipcRenderer.invoke("cangxia:pick-root"),
   setSettings: (s) => ipcRenderer.invoke("cangxia:set-settings", s),
-  refresh: () => ipcRenderer.invoke("cangxia:refresh"),
+  refresh: (opts) => ipcRenderer.invoke("cangxia:refresh", opts || {}),
   stopRefresh: () => ipcRenderer.invoke("cangxia:stop-refresh"),
   resumeRefresh: () => ipcRenderer.invoke("cangxia:resume-refresh"),
   download: (payload) => ipcRenderer.invoke("cangxia:download", payload),
