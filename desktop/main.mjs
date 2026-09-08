@@ -35,6 +35,8 @@ let readingStarted = 0;
 let readingFolderId = "default";
 let readingPattern = "listcollection";
 let readingHasMore = true;
+let readingOrder = 0;
+let seenThisRead = new Set();
 let readChoiceResolve = null;
 let loginWaiting = false;
 let captchaLock = false;
@@ -302,10 +304,10 @@ function ingestPayload(url, json) {
       work.alsoInFolderIds = [...new Set([...(work.alsoInFolderIds || []), "default"])];
     }
     const prev = captured.get(work.id);
+    work.listIndex = readingOrder;
+    if (reading === "收藏") work.allIndex = readingOrder;
+    readingOrder += 1;
     if (prev) {
-      work.listIndex = prev.listIndex;
-      work.allIndex = prev.allIndex;
-      if (reading === "收藏") work.allIndex = prev.allIndex ?? captured.size;
       const keepCustom = prev.folderId && prev.folderId !== "default" && reading === "收藏";
       if (keepCustom) {
         work.folderId = prev.folderId;
@@ -313,17 +315,20 @@ function ingestPayload(url, json) {
       } else if (prev.folderId !== work.folderId) {
         work.alsoInFolderIds = [...new Set([...(prev.alsoInFolderIds || []), prev.folderId, ...work.alsoInFolderIds])];
       }
-    } else {
-      work.listIndex = captured.size;
-      if (reading === "收藏") work.allIndex = captured.size;
     }
     captured.set(work.id, work);
+    seenThisRead.add(work.id);
   }
   send("cangxia:sync-count", { works: captured.size, folders: folders.length });
 }
 
 async function snapshotWorks() {
-  const works = [...captured.values()].sort((a, b) => (a.listIndex ?? 0) - (b.listIndex ?? 0));
+  const works = [...captured.values()].map((w) => {
+    if (seenThisRead.size && !seenThisRead.has(w.id)) {
+      return { ...w, listIndex: (w.listIndex ?? 0) + 1_000_000 };
+    }
+    return w;
+  }).sort((a, b) => (a.listIndex ?? 0) - (b.listIndex ?? 0));
   if (settings.rootPath) {
     const index = await readIndex(settings.rootPath);
     const downloaded = new Set((index.records || []).map((r) => r.id));
@@ -335,11 +340,12 @@ async function snapshotWorks() {
 }
 
 async function completeRefresh() {
+  const snap = await snapshotWorks();
   refreshReading = false;
   readingFolderName = "";
   readingStarted = 0;
+  seenThisRead = new Set();
   closeProgressWindow();
-  const snap = await snapshotWorks();
   send("cangxia:refresh-done", snap);
   send("cangxia:progress", { active: false, current: 0, total: 0, message: "" });
 }
@@ -381,6 +387,11 @@ async function waitForNewItems(prevCount, timeoutMs, folderName, folderId, start
   return captured.size > prevCount;
 }
 
+async function openFavoriteFresh(win) {
+  await win.loadURL("https://www.douyin.com/user/self", { userAgent: CHROME_UA });
+  await sleep(2800);
+}
+
 async function wheelBurst(win) {
   const wc = win.webContents;
   wc.sendInputEvent({ type: "mouseMove", x: 640, y: 420 });
@@ -400,7 +411,11 @@ async function wheelBurst(win) {
 }
 
 async function scrollUntilCap(win, { folderId, folderName, max, started }) {
+  readingOrder = 0;
+  readingHasMore = true;
+  seenThisRead = new Set();
   try {
+    await openFavoriteFresh(win);
     if (folderName && folderName !== "收藏") {
       await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
       await sleep(2500);
