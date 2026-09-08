@@ -57,17 +57,17 @@ export function SettingsDialog() {
             />
           </label>
           <label className="block text-sm">
-            每个收藏夹每次最多读
+            收藏夹单次读取数
             <input
               className="mt-1 h-11 w-full rounded-md border border-line bg-raised px-3 text-sm"
               type="number"
-              min={20}
+              min={1}
               max={5000}
               value={settings.maxPerRefresh ?? 300}
-              onChange={(e) => patchSettings({ maxPerRefresh: Math.max(20, Number(e.target.value) || 300) })}
+              onChange={(e) => patchSettings({ maxPerRefresh: Math.max(1, Number(e.target.value) || 1) })}
             />
             <span className="mt-1 block text-xs text-muted">
-              默认每个夹 300 条，不是全部夹加起来 300。会先读总收藏，再逐个自建夹。下次刷新会跳过已有的、继续往下滚。
+              只读你当前点开确认的那一个夹，不会一次读完所有夹。最少 1 条。下次再读同一夹会跳过已有的，继续往下。
             </span>
           </label>
         </div>

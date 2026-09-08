@@ -695,7 +695,7 @@ ipcMain.handle("cangxia:refresh", async () => {
   refreshStop = false;
   refreshPaused = false;
   refreshReading = false;
-  const max = Number(settings.maxPerRefresh) || 300;
+  const max = Math.max(1, Number(settings.maxPerRefresh) || 300);
   const win = openDouyinWindow("https://www.douyin.com/user/self", { forRefresh: true });
   openProgressWindow();
   send("cangxia:progress", {

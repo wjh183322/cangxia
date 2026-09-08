@@ -505,7 +505,7 @@ export const useApp = create<AppState>()(
             job: {
               active: true,
               current: 0,
-              total: get().settings.maxPerRefresh || 300,
+              total: Math.max(1, get().settings.maxPerRefresh || 300),
               message: "请在打开的抖音里点进「收藏」或某个收藏夹",
             },
             syncingBrowser: true,
