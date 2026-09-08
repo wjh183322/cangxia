@@ -199,13 +199,20 @@ export const SCROLL_FEED_SCRIPT = `(() => {
   });
   boxes.sort((a, b) => b.clientHeight - a.clientHeight);
   const box = boxes[0];
+  const page = (el) => Math.max(240, Math.round((el.clientHeight || innerHeight) * 0.8));
   if (box) {
-    box.scrollTop = box.scrollHeight;
-    return "box";
+    const maxTop = box.scrollHeight - box.clientHeight;
+    const next = Math.min(maxTop, box.scrollTop + page(box));
+    if (next <= box.scrollTop + 4) return "end";
+    box.scrollTop = next;
+    return "page";
   }
-  window.scrollTo(0, document.documentElement.scrollHeight);
-  document.documentElement.scrollTop = document.documentElement.scrollHeight;
-  return "window";
+  const maxTop = document.documentElement.scrollHeight - innerHeight;
+  const cur = window.scrollY || document.documentElement.scrollTop;
+  const next = Math.min(maxTop, cur + page(document.documentElement));
+  if (next <= cur + 4) return "end";
+  window.scrollTo(0, next);
+  return "page";
 })()`;
 
 export const LIST_SIDE_FOLDERS_SCRIPT = `(() => {

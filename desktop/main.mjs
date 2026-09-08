@@ -276,8 +276,42 @@ function countInFolder(folderId) {
   return n;
 }
 
-async function scrollUntilCap(win, { folderId, folderName, max, started }) {
+async function waitForNewItems(prevCount, timeoutMs, folderName, folderId, started, max) {
+  const t0 = Date.now();
   let last = captured.size;
+  let lastChange = Date.now();
+  while (Date.now() - t0 < timeoutMs && !refreshStop) {
+    const inFolder = folderId ? countInFolder(folderId) - started : captured.size - started;
+    send("cangxia:progress", {
+      active: true,
+      current: Math.min(Math.max(0, inFolder), max),
+      total: max,
+      message: `正在识别「${folderName}」 ${Math.max(0, inFolder)}/${max}，本页认完再翻`,
+    });
+    if (inFolder >= max) return true;
+    await sleep(250);
+    if (captured.size !== last) {
+      last = captured.size;
+      lastChange = Date.now();
+    }
+    if (captured.size > prevCount && Date.now() - lastChange > 900) return true;
+  }
+  return captured.size > prevCount;
+}
+
+async function scrollUntilCap(win, { folderId, folderName, max, started }) {
+  try {
+    if (folderName && folderName !== "收藏") {
+      await win.webContents.executeJavaScript(clickSideFolderScript(folderName));
+    } else {
+      await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+    }
+  } catch {
+    return;
+  }
+
+  await waitForNewItems(captured.size, 5000, folderName, folderId, started, max);
+
   let idle = 0;
   while (win && !win.isDestroyed() && !refreshStop) {
     while (refreshPaused && !refreshStop) await sleep(400);
@@ -290,21 +324,24 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
       message: `正在读取「${folderName}」 ${Math.max(0, inFolder)}/${max}（合计 ${captured.size}）`,
     });
     if (inFolder >= max) return;
+    const before = captured.size;
+    let scrolled = "page";
     try {
-      if (folderName && folderName !== "收藏") {
-        await win.webContents.executeJavaScript(clickSideFolderScript(folderName));
-      } else {
-        await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-      }
-      await win.webContents.executeJavaScript(SCROLL_FEED_SCRIPT);
+      scrolled = await win.webContents.executeJavaScript(SCROLL_FEED_SCRIPT);
     } catch {
       return;
     }
-    await sleep(1400);
-    if (captured.size === last) idle += 1;
-    else idle = 0;
-    last = captured.size;
-    if (idle >= 5) return;
+    send("cangxia:progress", {
+      active: true,
+      current: Math.min(Math.max(0, inFolder), max),
+      total: max,
+      message: `已翻下一页，等待识别「${folderName}」 ${Math.max(0, inFolder)}/${max}`,
+    });
+    const grew = await waitForNewItems(before, 5000, folderName, folderId, started, max);
+    if (grew) idle = 0;
+    else idle += 1;
+    if (scrolled === "end" && !grew) return;
+    if (idle >= 3) return;
   }
 }
 
