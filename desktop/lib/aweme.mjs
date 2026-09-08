@@ -1,7 +1,61 @@
+function stripWm(url) {
+  return String(url || "")
+    .replace(/playwm/g, "play")
+    .replace(/watermark=1/g, "watermark=0");
+}
+
 function pickUrl(urlList) {
   if (!Array.isArray(urlList) || urlList.length === 0) return "";
-  const clean = urlList.find((u) => typeof u === "string" && !u.includes("watermark"));
-  return clean || urlList[urlList.length - 1] || urlList[0] || "";
+  const urls = urlList.filter((u) => typeof u === "string" && u);
+  if (!urls.length) return "";
+  const clean = urls.find((u) => !/watermark|playwm/i.test(u));
+  return stripWm(clean || urls[0]);
+}
+
+function imageUrl(img) {
+  if (!img || typeof img !== "object") return "";
+  const lists = [
+    img.download_url_list,
+    img.origin_url?.url_list,
+    img.origin_large?.url_list,
+    img.display_image?.download_url_list,
+    img.display_image?.url_list,
+    img.largest?.url_list,
+    img.url_list,
+  ];
+  for (const list of lists) {
+    const url = pickUrl(list);
+    if (url) return url;
+  }
+  return "";
+}
+
+function coverUrl(video) {
+  if (!video || typeof video !== "object") return "";
+  return (
+    pickUrl(video.origin_cover?.url_list) ||
+    pickUrl(video.big_thumb?.url_list) ||
+    pickUrl(video.cover?.url_list) ||
+    pickUrl(video.dynamic_cover?.url_list) ||
+    pickUrl(video.ai_cover?.url_list) ||
+    ""
+  );
+}
+
+function videoUrl(video) {
+  if (!video || typeof video !== "object") return "";
+  const rates = Array.isArray(video.bit_rate) ? [...video.bit_rate] : [];
+  rates.sort(
+    (a, b) =>
+      (Number(b.bit_rate) || Number(b.data_size) || 0) - (Number(a.bit_rate) || Number(a.data_size) || 0),
+  );
+  for (const rate of rates) {
+    const url = pickUrl(rate?.play_addr?.url_list || rate?.play_addr_h264?.url_list || []);
+    if (url) return url;
+  }
+  return pickUrl(
+    video.play_addr_h264?.url_list || video.play_addr?.url_list || video.download_addr?.url_list || [],
+  );
 }
 
 function hashtagsFrom(aweme) {
@@ -14,37 +68,32 @@ function hashtagsFrom(aweme) {
 
 function mediaFrom(aweme) {
   const id = aweme.aweme_id || aweme.id || "";
-  const posts = aweme.images || aweme.image_post_info?.images || [];
+  const posts =
+    (Array.isArray(aweme.images) && aweme.images.length && aweme.images) ||
+    aweme.image_post_info?.images ||
+    [];
+  const isNote = posts.length > 0 || [2, 68, 107, 151].includes(Number(aweme.aweme_type));
   const images = [];
   const videos = [];
   for (const [i, img] of posts.entries()) {
-    const clip = pickUrl(
-      img.video?.play_addr_h264?.url_list ||
-        img.video?.play_addr?.url_list ||
-        img.clip?.url_list ||
-        [],
-    );
-    if (clip) videos.push({ id: `${id}_v${i}`, url: clip });
-    const still = pickUrl(img.url_list || img.display_image?.url_list || []);
+    const still = imageUrl(img);
     if (still) images.push({ id: `${id}_${i}`, url: still });
+    const live = videoUrl(img.video) || pickUrl(img.clip?.url_list || []);
+    if (live) videos.push({ id: `${id}_v${i}`, url: live });
   }
-  const cover = pickUrl(
-    aweme.video?.origin_cover?.url_list || aweme.video?.cover?.url_list || aweme.video?.dynamic_cover?.url_list || [],
-  );
-  const mainVideo = pickUrl(
-    aweme.video?.play_addr_h264?.url_list ||
-      aweme.video?.play_addr?.url_list ||
-      aweme.video?.download_addr?.url_list ||
-      [],
-  );
-  if (mainVideo && !videos.some((v) => v.url === mainVideo)) {
-    videos.unshift({ id: `${id}_v`, url: mainVideo });
+  if (!isNote) {
+    const cover = coverUrl(aweme.video);
+    const mainVideo = videoUrl(aweme.video);
+    if (cover) images.push({ id: `${id}_still`, url: cover });
+    if (mainVideo) videos.push({ id: `${id}_v`, url: mainVideo });
   }
-  if (!images.length && cover) images.push({ id: `${id}_still`, url: cover });
   let kind = "album";
-  const postHasStills = posts.length > 0 && images.length > 0;
-  if (postHasStills && videos.length) kind = "mixed";
-  else if (videos.length) kind = "video";
+  if (isNote) {
+    if (images.length && videos.length) kind = "mixed";
+    else if (videos.length) kind = "video";
+  } else if (videos.length) {
+    kind = "video";
+  }
   return { kind, images, videos };
 }
 

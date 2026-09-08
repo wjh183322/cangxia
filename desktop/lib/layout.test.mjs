@@ -58,14 +58,40 @@ test("mapAweme album picks non-watermark url", () => {
   assert.deepEqual(work.hashtags, ["静物"]);
 });
 
-test("mapAweme video keeps still and play_addr", () => {
+test("mapAweme album prefers download_url_list and ignores slideshow video", () => {
+  const work = mapAweme(
+    {
+      aweme_id: "note1",
+      aweme_type: 68,
+      desc: "懒得说话的图文作品 #穹妹",
+      images: [
+        { download_url_list: ["https://hd/1.jpg"], url_list: ["https://x/watermark/a.jpg"] },
+        { download_url_list: ["https://hd/2.jpg"], url_list: ["https://x/watermark/b.jpg"] },
+      ],
+      video: { play_addr: { url_list: ["https://x/slideshow.mp4"] } },
+      author: { nickname: "懒得说话的", unique_id: "lan" },
+    },
+    { id: "default", name: "收藏" },
+  );
+  assert.equal(work.kind, "album");
+  assert.equal(work.images.length, 2);
+  assert.equal(work.videos.length, 0);
+  assert.equal(work.images[0].url, "https://hd/1.jpg");
+  assert.equal(work.images[1].url, "https://hd/2.jpg");
+});
+
+test("mapAweme video keeps still and highest bit_rate", () => {
   const work = mapAweme(
     {
       aweme_id: "8",
       desc: "雾松",
       video: {
         origin_cover: { url_list: ["https://x/still.jpg"] },
-        play_addr: { url_list: ["https://x/watermark.mp4", "https://x/origin.mp4"] },
+        play_addr: { url_list: ["https://x/playwm.mp4"] },
+        bit_rate: [
+          { bit_rate: 800000, play_addr: { url_list: ["https://x/low.mp4"] } },
+          { bit_rate: 4000000, play_addr: { url_list: ["https://x/playwm-hi.mp4"] } },
+        ],
       },
       author: { nickname: "山", unique_id: "shan" },
     },
@@ -73,9 +99,9 @@ test("mapAweme video keeps still and play_addr", () => {
   );
   assert.equal(work.kind, "video");
   assert.equal(work.images.length, 1);
+  assert.equal(work.images[0].url, "https://x/still.jpg");
   assert.equal(work.videos.length, 1);
-  assert.equal(work.videoUrl, "https://x/origin.mp4");
-  assert.equal(work.videoStatus, "pending");
+  assert.equal(work.videoUrl, "https://x/play-hi.mp4");
 });
 
 test("writes numbered videos beside stills", async () => {
