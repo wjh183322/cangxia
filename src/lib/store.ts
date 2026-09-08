@@ -88,6 +88,7 @@ interface AppState {
   setBrowseMediaIndex: (index: number) => void;
   armTidy: () => void;
   toggleTidy: (id: string) => void;
+  setTidyIds: (ids: string[]) => void;
   askDelete: (ids: string[]) => void;
   cancelDelete: () => void;
   confirmDelete: () => Promise<void>;
@@ -353,6 +354,7 @@ export const useApp = create<AppState>()(
         set((s) => ({
           tidyIds: s.tidyIds.includes(id) ? s.tidyIds.filter((x) => x !== id) : [...s.tidyIds, id],
         })),
+      setTidyIds: (ids) => set({ tidyIds: [...new Set(ids.filter(Boolean))] }),
       askDelete: (ids) => {
         const unique = [...new Set(ids.filter(Boolean))];
         if (!unique.length || get().job.active) return;

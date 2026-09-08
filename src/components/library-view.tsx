@@ -44,6 +44,7 @@ export function LibraryView() {
   const tidyIds = useApp((s) => s.tidyIds);
   const armTidy = useApp((s) => s.armTidy);
   const toggleTidy = useApp((s) => s.toggleTidy);
+  const setTidyIds = useApp((s) => s.setTidyIds);
   const askDelete = useApp((s) => s.askDelete);
   const job = useApp((s) => s.job);
   const dlBusy = useApp((s) => s.dlTasks.some((t) => t.status === "downloading"));
@@ -224,18 +225,34 @@ export function LibraryView() {
           {tidyArmed ? "退出整理" : "整理"}
         </Button>
         {tidyArmed && (
-          <Button
-            size="sm"
-            variant="danger"
-            disabled={busy || tidyIds.length === 0}
-            onClick={() => askDelete(tidyIds)}
-          >
-            删除选中（{tidyIds.length}）
-          </Button>
+          <>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy || filtered.length === 0}
+              onClick={() => {
+                const ids = filtered.map((w) => w.id);
+                const allOn = ids.length > 0 && ids.every((id) => tidyIds.includes(id));
+                setTidyIds(allOn ? [] : ids);
+              }}
+            >
+              {filtered.length > 0 && filtered.every((w) => tidyIds.includes(w.id))
+                ? "取消全选"
+                : `全选（${filtered.length}）`}
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={busy || tidyIds.length === 0}
+              onClick={() => askDelete(tidyIds)}
+            >
+              删除选中（{tidyIds.length}）
+            </Button>
+          </>
         )}
         <p className="text-xs text-muted">
           {tidyArmed
-            ? "点封面勾选，再点删除选中。再点整理取消。"
+            ? "可全选当前列表，再点删除选中。再点整理取消。"
             : browseArmed
               ? "点一条封面，从这条开始上下浏览。封面墙不会先打开作品。"
               : kindHint(kind, "library")}
