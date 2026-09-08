@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>开始读取</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0c0c0d;
+        color: #f2f1ee;
+        font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      }
+      .box {
+        box-sizing: border-box;
+        height: 100%;
+        padding: 28px 24px 20px;
+        display: flex;
+        flex-direction: column;
+      }
+      h1 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      p {
+        margin: 10px 0 0;
+        font-size: 13px;
+        color: #8e8d89;
+        line-height: 1.6;
+      }
+      #name {
+        color: #f2f1ee;
+        font-weight: 600;
+      }
+      .actions {
+        margin-top: auto;
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+      button {
+        height: 36px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 8px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .no {
+        background: #161618;
+        color: #c6c4be;
+      }
+      .yes {
+        background: #f2f1ee;
+        color: #111;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h1>已识别到「<span id="name">收藏</span>」</h1>
+      <p>是否开始读取这个收藏夹？读完后会关掉抖音窗口。其他夹需要你再点「读取收藏」，并手动打开那个夹。</p>
+      <div class="actions">
+        <button class="no" id="no" type="button">否</button>
+        <button class="yes" id="yes" type="button">是，开始读取</button>
+      </div>
+    </div>
+    <script>
+      document.getElementById("name").textContent = window.cangxiaRead.name();
+      document.getElementById("yes").onclick = () => window.cangxiaRead.choose(true);
+      document.getElementById("no").onclick = () => window.cangxiaRead.choose(false);
+    </script>
+  </body>
+</html>

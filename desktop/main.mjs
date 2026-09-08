@@ -6,7 +6,7 @@ import { collectAwemes, mapAweme, mapFolder } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, SCROLL_FEED_SCRIPT, LIST_SIDE_FOLDERS_SCRIPT, clickSideFolderScript, isHttpUrl } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, SCROLL_FEED_SCRIPT, LIST_SIDE_FOLDERS_SCRIPT, clickSideFolderScript, INSTALL_FOLDER_WATCH_SCRIPT, isHttpUrl } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -27,6 +27,8 @@ let folders = [{ id: "default", name: "收藏", isDefault: true }];
 let settings = { rootPath: "", pushplusToken: "", wxpusherSpt: "", maxPerRefresh: 300 };
 let refreshStop = false;
 let refreshPaused = false;
+let refreshReading = false;
+let readChoiceResolve = null;
 let loginWaiting = false;
 let captchaLock = false;
 let lastCaptchaNotify = 0;
@@ -159,6 +161,7 @@ function ingestPayload(url, json) {
       }
     }
   }
+  if (!refreshReading) return;
   const awemes = collectAwemes(json);
   for (const aweme of awemes) {
     const folder = folders.find((f) => f.id === String(aweme.collects_id || "")) || folders[0];
@@ -187,6 +190,7 @@ async function snapshotWorks() {
 }
 
 async function completeRefresh() {
+  refreshReading = false;
   const snap = await snapshotWorks();
   send("cangxia:refresh-done", snap);
   send("cangxia:progress", { active: false, current: 0, total: 0, message: "" });
@@ -209,12 +213,17 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     const inFolder = folderId ? countInFolder(folderId) - started : captured.size - started;
     send("cangxia:progress", {
       active: true,
-      current: captured.size,
-      total: Math.max(max, captured.size),
-      message: `正在读「${folderName}」本夹 ${Math.max(0, inFolder)}/${max} · 合计 ${captured.size}`,
+      current: Math.min(Math.max(0, inFolder), max),
+      total: max,
+      message: `正在读取「${folderName}」 ${Math.max(0, inFolder)}/${max}（合计 ${captured.size}）`,
     });
     if (inFolder >= max) return;
     try {
+      if (folderName && folderName !== "收藏") {
+        await win.webContents.executeJavaScript(clickSideFolderScript(folderName));
+      } else {
+        await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+      }
       await win.webContents.executeJavaScript(SCROLL_FEED_SCRIPT);
     } catch {
       return;
@@ -227,63 +236,109 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   }
 }
 
-async function runRefreshLoop(win, max) {
-  await sleep(800);
-  let favTries = 0;
-  while (win && !win.isDestroyed() && !refreshStop && favTries < 14) {
+function closeReadPrompt() {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.getTitle() === "开始读取" && !w.isDestroyed()) w.close();
+  }
+}
+
+function askReadFolder(name) {
+  closeReadPrompt();
+  return new Promise((resolve) => {
+    if (readChoiceResolve) {
+      readChoiceResolve(false);
+      readChoiceResolve = null;
+    }
+    const prompt = new BrowserWindow({
+      width: 440,
+      height: 240,
+      resizable: false,
+      title: "开始读取",
+      parent: douyinWindow || mainWindow || undefined,
+      modal: true,
+      autoHideMenuBar: true,
+      backgroundColor: "#0c0c0d",
+      webPreferences: {
+        preload: join(__dirname, "read-confirm-preload.cjs"),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    prompt.setMenuBarVisibility(false);
+    let settled = false;
+    const finish = (yes) => {
+      if (settled) return;
+      settled = true;
+      readChoiceResolve = null;
+      if (!prompt.isDestroyed()) prompt.close();
+      resolve(Boolean(yes));
+    };
+    readChoiceResolve = finish;
+    void prompt.loadFile(join(__dirname, "read-confirm.html"), { query: { name: name || "收藏" } });
+    prompt.on("closed", () => finish(false));
+  });
+}
+
+async function watchAndRead(win, max) {
+  const denied = new Set();
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: max,
+    message: "已打开抖音。请点进「收藏」，或再点左边某个收藏夹",
+  });
+  while (win && !win.isDestroyed() && !refreshStop) {
+    let state = { view: "other", name: "" };
     try {
-      const tab = await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-      send("cangxia:progress", {
-        active: true,
-        current: captured.size,
-        total: max,
-        message: "正在打开「收藏」页…",
-      });
-      if (tab === "already" || captured.size > 0) break;
+      state = await win.webContents.executeJavaScript(INSTALL_FOLDER_WATCH_SCRIPT);
     } catch {
       break;
     }
-    favTries += 1;
-    await sleep(1100);
-  }
-
-  const defaultStart = captured.size;
-  await scrollUntilCap(win, { folderId: null, folderName: "全部收藏", max, started: defaultStart });
-
-  let names = folders.filter((f) => !f.isDefault).map((f) => f.name);
-  if (!names.length) {
-    try {
-      const listed = await win.webContents.executeJavaScript(LIST_SIDE_FOLDERS_SCRIPT);
-      if (Array.isArray(listed)) names = listed.filter(Boolean);
-    } catch {
-      /* ignore */
+    const key = `${state?.view || "other"}:${state?.name || ""}`;
+    if ((state.view === "favorite" || state.view === "folder") && state.name && !denied.has(key)) {
+      send("cangxia:progress", {
+        active: true,
+        current: 0,
+        total: max,
+        message: `已识别到「${state.name}」，等待你确认是否读取`,
+      });
+      const yes = await askReadFolder(state.name);
+      if (refreshStop || !win || win.isDestroyed()) break;
+      if (yes) {
+        refreshReading = true;
+        const folder = folders.find((f) => f.name === state.name);
+        const started = folder ? countInFolder(folder.id) : captured.size;
+        await scrollUntilCap(win, {
+          folderId: folder?.id || (state.name === "收藏" ? "default" : null),
+          folderName: state.name,
+          max,
+          started,
+        });
+        await completeRefresh();
+        if (win && !win.isDestroyed()) win.close();
+        return;
+      }
+      denied.add(key);
+      send("cangxia:progress", {
+        active: true,
+        current: 0,
+        total: max,
+        message: "未读取。可点另一个收藏夹，或点停止",
+      });
     }
-  }
-
-  for (const name of names) {
-    if (!win || win.isDestroyed() || refreshStop) break;
-    const folder = folders.find((f) => f.name === name);
-    const started = folder ? countInFolder(folder.id) : captured.size;
-    try {
-      await win.webContents.executeJavaScript(clickSideFolderScript(name));
-    } catch {
-      continue;
-    }
-    await sleep(1200);
-    await scrollUntilCap(win, {
-      folderId: folder?.id || null,
-      folderName: name,
-      max,
-      started,
-    });
+    await sleep(800);
   }
   await completeRefresh();
+  if (win && !win.isDestroyed()) win.close();
 }
 
-function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false } = {}) {
+function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false, forRefresh = false } = {}) {
+  const width = forRefresh ? 1320 : assistQr ? 560 : 1100;
   if (douyinWindow && !douyinWindow.isDestroyed()) {
     if (assistQr) douyinWindow.hide();
     else {
+      douyinWindow.setSize(width, 820);
       douyinWindow.show();
       douyinWindow.focus();
     }
@@ -291,9 +346,9 @@ function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false }
     return douyinWindow;
   }
   douyinWindow = new BrowserWindow({
-    width: 980,
-    height: 760,
-    title: assistQr ? "抖音登录" : "抖音收藏",
+    width,
+    height: forRefresh ? 820 : 760,
+    title: assistQr ? "抖音登录" : "抖音",
     parent: assistQr ? undefined : mainWindow || undefined,
     show: !assistQr,
     skipTaskbar: assistQr,
@@ -312,15 +367,15 @@ function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false }
     }
   });
   douyinWindow.webContents.on("did-finish-load", () => {
-    const url = douyinWindow.webContents.getURL();
-    if (!loginWaiting && /user\/self|showTab=favorite/.test(url)) {
-      void douyinWindow.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT).catch(() => {});
+    if (!loginWaiting) {
+      void douyinWindow.webContents.executeJavaScript(INSTALL_FOLDER_WATCH_SCRIPT).catch(() => {});
     }
   });
   void douyinWindow.loadURL(path, { userAgent: CHROME_UA });
   douyinWindow.on("closed", () => {
     douyinWindow = null;
     if (loginWaiting) loginWaiting = false;
+    if (readChoiceResolve) readChoiceResolve(false);
   });
   return douyinWindow;
 }
@@ -452,21 +507,24 @@ ipcMain.handle("cangxia:refresh", async () => {
   captured.clear();
   refreshStop = false;
   refreshPaused = false;
+  refreshReading = false;
   const max = Number(settings.maxPerRefresh) || 300;
-  const win = openDouyinWindow("https://www.douyin.com/user/self?showTab=favorite");
+  const win = openDouyinWindow("https://www.douyin.com/user/self", { forRefresh: true });
   send("cangxia:progress", {
     active: true,
     current: 0,
     total: max,
-    message: `正在读取收藏，最多 ${max} 条`,
+    message: "已打开抖音（作品页）。请点进「收藏」或某个收藏夹",
   });
-  void runRefreshLoop(win, max);
+  void watchAndRead(win, max);
   return { ok: true, waiting: true };
 });
 
 ipcMain.handle("cangxia:stop-refresh", async () => {
   refreshStop = true;
   refreshPaused = false;
+  refreshReading = false;
+  if (readChoiceResolve) readChoiceResolve(false);
   clearCaptchaLock();
   return { ok: true };
 });
@@ -474,6 +532,11 @@ ipcMain.handle("cangxia:stop-refresh", async () => {
 ipcMain.handle("cangxia:resume-refresh", async () => {
   refreshPaused = false;
   clearCaptchaLock();
+  return { ok: true };
+});
+
+ipcMain.handle("cangxia:read-choice", async (_e, yes) => {
+  if (readChoiceResolve) readChoiceResolve(Boolean(yes));
   return { ok: true };
 });
 

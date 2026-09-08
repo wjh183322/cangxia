@@ -1,7 +1,7 @@
 {
   "name": "cangxia-desktop",
   "private": true,
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "藏匣 Windows 本机程序",
   "main": "main.mjs",
   "type": "module",
@@ -20,7 +20,7 @@
   "build": {
     "appId": "com.cangxia.app",
     "productName": "藏匣",
-    "files": ["main.mjs", "preload.cjs", "qr-preload.cjs", "qr.html", "lib/**", "ui/**"],
+    "files": ["main.mjs", "preload.cjs", "qr-preload.cjs", "qr.html", "read-confirm-preload.cjs", "read-confirm.html", "lib/**", "ui/**"],
     "directories": { "output": "dist-win" },
     "win": {
       "target": [

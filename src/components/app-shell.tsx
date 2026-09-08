@@ -55,12 +55,12 @@ export function AppShell() {
         <div className="ml-auto flex items-center gap-2">
           {syncingBrowser && (
             <Button size="sm" onClick={() => void finishRefresh()}>
-              停止，先用已读到的（{syncCount.works}）
+              停止（已读 {syncCount.works}）
             </Button>
           )}
           <Button size="sm" variant="secondary" onClick={() => void refresh()} disabled={job.active && !syncingBrowser}>
             <RefreshCw className={`size-4 ${job.active ? "animate-spin" : ""}`} />
-            刷新
+            读取收藏
           </Button>
           <DownloadMiniBar />
           <Button size="icon" variant="ghost" onClick={() => setSettingsOpen(true)} aria-label="设置">
@@ -72,14 +72,22 @@ export function AppShell() {
         </div>
       </header>
 
-      {syncingBrowser && (
-        <div className="border-b border-line bg-surface px-4 py-2 text-xs text-muted">
-          {job.message}
-          {job.total > 0 && (
-            <span className="ml-2 tabular-nums">
-              {job.current}/{job.total}
-            </span>
-          )}
+      {(syncingBrowser || job.active) && (
+        <div className="border-b border-line bg-surface px-4 py-3">
+          <div className="flex items-center justify-between gap-3 text-sm text-fg">
+            <span>{job.message || "正在读取收藏"}</span>
+            {job.total > 0 && (
+              <span className="shrink-0 tabular-nums text-muted">
+                {job.current}/{job.total}
+              </span>
+            )}
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
+            <div
+              className="h-full rounded-full bg-fg/80 transition-[width]"
+              style={{ width: `${job.total ? Math.min(100, Math.round((job.current / job.total) * 100)) : job.active ? 8 : 0}%` }}
+            />
+          </div>
         </div>
       )}
 

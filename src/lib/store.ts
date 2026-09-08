@@ -466,7 +466,7 @@ export const useApp = create<AppState>()(
               active: true,
               current: 0,
               total: get().settings.maxPerRefresh || 300,
-              message: `每个收藏夹最多 ${get().settings.maxPerRefresh || 300} 条，会逐个夹读取`,
+              message: "请在打开的抖音里点进「收藏」或某个收藏夹",
             },
             syncingBrowser: true,
           });
