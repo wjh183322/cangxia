@@ -590,16 +590,47 @@ async function netCookieRequest(win, { method = "GET", path, query = {}, body = 
   return sessionRequest(method, `${path}?${qs}`, body);
 }
 
+async function goCollectContext(win, folderName) {
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: 1,
+    message: "先打开收藏，离开作品页",
+  });
+  await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+  await sleep(2800);
+  if (folderName === "收藏") return;
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: 1,
+    message: "打开收藏夹列表",
+  });
+  await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+  await sleep(2800);
+  readingCollectsId = folderIdByName(folderName) || (await waitFolderId(folderName)) || readingCollectsId;
+}
+
 async function harvestMcp(win, ctx) {
-  if (ctx.folderName === "收藏") {
-    await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-    await sleep(2500);
-  } else {
-    await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-    await sleep(2000);
-    await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
-    await sleep(3500);
-    readingCollectsId = folderIdByName(ctx.folderName);
+  if (ctx.folderName !== "收藏") {
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: ctx.max || 1,
+      message: `${ctx.label || "5/5"} 点进「${ctx.folderName}」，不要停在卡片墙`,
+    });
+    const how = await openNamedFolder(win, ctx.folderName, { skipNav: true });
+    if (how === "none") {
+      send("cangxia:progress", {
+        active: true,
+        current: 0,
+        total: ctx.max || 1,
+        message: `${ctx.label || "5/5"} 没点进「${ctx.folderName}」`,
+      });
+      return 0;
+    }
+    readingInside = true;
+    replayFolderBuffer();
   }
   return harvestByIntercept(win, ctx);
 }
@@ -757,18 +788,20 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
   return countProgress(folderId, folderName, started);
 }
 
-async function openNamedFolder(win, folderName) {
+async function openNamedFolder(win, folderName, { skipNav = false } = {}) {
   send("cangxia:progress", {
     active: true,
     current: 0,
     total: 1,
-    message: `正在打开收藏夹，准备点进「${folderName}」`,
+    message: skipNav ? `正在点进「${folderName}」` : `正在打开收藏夹，准备点进「${folderName}」`,
   });
-  await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-  await sleep(2500);
-  await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
-  await sleep(2500);
-  readingCollectsId = (await waitFolderId(folderName)) || readingCollectsId;
+  if (!skipNav) {
+    await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+    await sleep(2500);
+    await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+    await sleep(2500);
+  }
+  readingCollectsId = (await waitFolderId(folderName)) || readingCollectsId || folderIdByName(folderName);
   send("cangxia:progress", {
     active: true,
     current: 0,
@@ -837,6 +870,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   };
   try {
     await openFavoriteFresh(win);
+    await goCollectContext(win, folderName);
     try {
       await win.webContents.executeJavaScript(waitBdmsScript());
     } catch {
