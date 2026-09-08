@@ -217,7 +217,14 @@ const FOLDER_TEXT_HELPER = `const norm = (s) => String(s || "").replace(/\\s+/g,
 export function validFolderName(name) {
   const n = String(name || "").trim();
   if (!n || n.length > 16) return false;
-  if (/收藏夹|视频|音乐|合集|短剧|新建|添加视频|批量管理|返回|观看历史|稍后再看|我的预约/.test(n)) return false;
+  if (/^\d+$/.test(n)) return false;
+  if (
+    /收藏夹|视频|音乐|合集|短剧|新建|添加视频|批量管理|返回|观看历史|稍后再看|我的预约|粉丝|关注|作品|获赞|推荐|精选|直播|抖音号|许可证|备案|京ICP|ICP备|信息网络|节目许可/.test(
+      n,
+    )
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -343,27 +350,23 @@ export function folderInsideScript(name) {
 export const LIST_VISIBLE_FOLDERS_SCRIPT = `(() => {
   const stripLock = (s) => String(s || "").replace(/[🔒锁★☆\\u2B50\\u2605\\u2606]/g, "");
   const textOf = (el) => stripLock((el.innerText || el.textContent || "").replace(/\\s+/g, ""));
-  const junk = /收藏夹|视频|音乐|合集|短剧|新建|添加视频|批量管理|返回|观看历史|稍后再看/;
+  const junk = /收藏夹|视频|音乐|合集|短剧|新建|添加视频|批量管理|返回|观看历史|稍后再看|粉丝|关注|作品|获赞|推荐|精选|直播|抖音号|许可证|备案|京ICP|ICP备|信息网络|节目许可/;
   const seen = new Set();
   const names = [];
   const add = (name) => {
     const n = String(name || "").trim();
-    if (!n || n.length > 16 || junk.test(n) || seen.has(n) || n === "收藏") return;
+    if (!n || n.length > 16 || junk.test(n) || seen.has(n) || n === "收藏" || /^\\d+$/.test(n)) return;
     seen.add(n);
     names.push(n);
   };
   for (const el of document.querySelectorAll("div, a, li, section, span")) {
+    const r = el.getBoundingClientRect();
+    if (r.top < 120 || r.bottom > innerHeight - 48) continue;
+    if (r.left < 160 || r.width < 80) continue;
     const t = textOf(el);
     if (t.length > 40) continue;
     const m = t.match(/^(.{1,16}?)共\\d+作品/);
     if (m) add(m[1]);
-  }
-  for (const el of document.querySelectorAll("div, a, li, span, p, button")) {
-    const r = el.getBoundingClientRect();
-    if (r.left > 560 || r.top < 70 || r.width < 48 || r.height < 18 || r.height > 110) continue;
-    const t = textOf(el);
-    const m = t.match(/^(.{1,16}?)(\\d{1,5})$/);
-    if (m && !/^\\d+$/.test(m[1])) add(m[1]);
   }
   return names;
 })()`;

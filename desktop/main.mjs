@@ -315,7 +315,7 @@ function ingestPayload(url, json) {
       for (const [i, raw] of list.entries()) {
         const mapped = mapFolder(raw, i);
         if (!mapped.name || mapped.isDefault) continue;
-        if (/^(视频|音乐|合集|短剧|收藏夹|话题|特效)$/.test(mapped.name)) continue;
+        if (!validFolderName(mapped.name)) continue;
         ensureFolder(mapped.name, mapped.id);
       }
     }
