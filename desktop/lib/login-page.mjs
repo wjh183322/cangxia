@@ -191,12 +191,19 @@ export const CLICK_FOLDER_TAB_SCRIPT = `(() => {
     return r.width > 8 && r.height > 8 && r.bottom > 0 && r.top < innerHeight;
   };
   const nodes = [...document.querySelectorAll("span, div, a, button, p, li")];
-  const hits = nodes.filter((el) => vis(el) && textOf(el) === "收藏夹" && el.childElementCount <= 6);
-  hits.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  const video = nodes.find((el) => vis(el) && textOf(el) === "视频" && el.childElementCount <= 4);
+  const vr = video ? video.getBoundingClientRect() : null;
+  const hits = nodes.filter((el) => {
+    if (!vis(el) || textOf(el) !== "收藏夹" || el.childElementCount > 6) return false;
+    const r = el.getBoundingClientRect();
+    if (vr && Math.abs(r.top - vr.top) < 36 && r.left < vr.left) return true;
+    if (!vr && r.top > 140 && r.top < 480) return true;
+    return false;
+  });
+  hits.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
   if (!hits[0]) return "none";
-  const r = hits[0].getBoundingClientRect();
   (hits[0].closest("a, button, [role='tab']") || hits[0]).click();
-  return "clicked:" + Math.round(r.top);
+  return "clicked";
 })()`;
 
 export function normalizeFolderText(s) {

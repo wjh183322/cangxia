@@ -751,12 +751,12 @@ async function harvestFolderNames(win) {
     active: true,
     current: 0,
     total: 1,
-    message: "正在读取自建收藏夹名单",
+    message: "正在读取自建收藏夹名单，等收藏夹卡片出现",
   });
   const href = await currentHref(win);
-  if (!/favorite_collection/i.test(href)) {
+  if (!/favorite_collection|favorite/i.test(href)) {
     await win.loadURL("https://www.douyin.com/user/self?showTab=favorite_collection", { userAgent: CHROME_UA });
-    await sleep(3200);
+    await sleep(4000);
   }
   try {
     await win.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT);
@@ -764,31 +764,47 @@ async function harvestFolderNames(win) {
     /* ignore */
   }
   try {
-    await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+    await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
   } catch {
     /* ignore */
   }
-  await sleep(2500);
-  await drainPageFeeds(win);
-  await sleep(1500);
-  await drainPageFeeds(win);
+  await sleep(1200);
+  const deadline = Date.now() + 28000;
+  const startedAt = Date.now();
   let visible = [];
-  try {
-    visible = await win.webContents.executeJavaScript(LIST_VISIBLE_FOLDERS_SCRIPT);
-  } catch {
-    visible = [];
+  let round = 0;
+  while (Date.now() < deadline && !refreshStop) {
+    round += 1;
+    try {
+      await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+    } catch {
+      /* ignore */
+    }
+    await sleep(round === 1 ? 2200 : 1400);
+    await drainPageFeeds(win);
+    try {
+      visible = await win.webContents.executeJavaScript(LIST_VISIBLE_FOLDERS_SCRIPT);
+    } catch {
+      visible = [];
+    }
+    const names = [...new Set((visible || []).filter((n) => validFolderName(n)))];
+    const fromApi = folders.filter((f) => !f.isDefault).map((f) => f.name);
+    const got = [...new Set([...names, ...fromApi])];
+    send("cangxia:progress", {
+      active: true,
+      current: got.length,
+      total: Math.max(1, got.length),
+      message: got.length ? `已识别收藏夹：${got.join("、")}` : `等待收藏夹卡片（${Math.round((Date.now() - startedAt) / 1000)}s）`,
+    });
+    if (got.length) {
+      for (const name of got) ensureFolder(name);
+      await sleep(600);
+      return;
+    }
   }
   for (const name of visible || []) {
     if (validFolderName(name)) ensureFolder(name);
   }
-  const names = folders.filter((f) => !f.isDefault).map((f) => f.name);
-  send("cangxia:progress", {
-    active: true,
-    current: names.length,
-    total: Math.max(1, names.length),
-    message: names.length ? `已识别收藏夹：${names.join("、")}` : `页面夹名0个 ${visible?.length || 0}`,
-  });
-  await sleep(900);
 }
 
 async function harvestMcp(win, ctx) {
