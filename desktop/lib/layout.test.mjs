@@ -123,6 +123,23 @@ test("mapAweme video skips h265 for a playable mp4", () => {
   assert.equal(work.videoUrl, "https://x/avc.mp4");
 });
 
+test("mapAweme builds iesdouyin play url from video uri", () => {
+  const work = mapAweme(
+    {
+      aweme_id: "uri1",
+      desc: "舞",
+      video: {
+        origin_cover: { url_list: ["https://x/still.jpg"] },
+        play_addr: { uri: "v0200abc", url_list: ["https://x/cover.jpg"] },
+      },
+      author: { nickname: "山", unique_id: "shan" },
+    },
+    { id: "default", name: "收藏" },
+  );
+  assert.match(work.videoUrl, /iesdouyin\.com\/aweme\/v1\/play\/\?video_id=v0200abc/);
+  assert.ok(work.videos[0].urls.some((u) => u.includes("snssdk.com")));
+});
+
 test("writes numbered videos beside stills", async () => {
   const root = await mkdtemp(join(tmpdir(), "cangxia-vid-"));
   try {

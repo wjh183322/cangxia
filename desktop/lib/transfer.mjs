@@ -3,12 +3,18 @@ import { open, unlink } from "node:fs/promises";
 import { net } from "electron";
 import { CHROME_UA } from "./login-page.mjs";
 
+const MOBILE_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
+
 export function transferToFile({ url, dest, session, signal, headers, onProgress }) {
   return new Promise((resolve, reject) => {
+    const play = /aweme\/v1\/play/i.test(url);
     const req = net.request({ url, session, redirect: "follow" });
     req.setHeader("Referer", headers?.Referer || "https://www.douyin.com/");
     req.setHeader("Origin", headers?.Origin || "https://www.douyin.com");
-    req.setHeader("User-Agent", headers?.["User-Agent"] || CHROME_UA);
+    req.setHeader("User-Agent", headers?.["User-Agent"] || (play ? MOBILE_UA : CHROME_UA));
+    req.setHeader("Accept", "*/*");
+    req.setHeader("Accept-Encoding", "identity");
 
     const abort = () => {
       try {

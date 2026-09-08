@@ -28,8 +28,24 @@ function isPlayableRate(rate) {
   return true;
 }
 
-function videoUrl(video) {
-  if (!video || typeof video !== "object") return "";
+function playUri(video) {
+  const uri = video.play_addr?.uri || video.play_addr_h264?.uri || video.download_addr?.uri || video.vid || "";
+  return String(uri);
+}
+
+function videoCandidates(video) {
+  if (!video || typeof video !== "object") return [];
+  const urls = [];
+  const push = (u) => {
+    const v = stripWm(u);
+    if (v && isVideoUrl(v) && !urls.includes(v)) urls.push(v);
+  };
+  const uri = playUri(video);
+  if (uri && !/^https?:/i.test(uri)) {
+    const q = encodeURIComponent(uri);
+    push(`https://www.iesdouyin.com/aweme/v1/play/?video_id=${q}&ratio=1080p&line=0&watermark=0`);
+    push(`https://aweme.snssdk.com/aweme/v1/play/?video_id=${q}&ratio=1080p&line=0`);
+  }
   const rates = Array.isArray(video.bit_rate) ? [...video.bit_rate] : [];
   const playable = rates.filter(isPlayableRate);
   const pool = (playable.length ? playable : rates).sort(
@@ -37,13 +53,16 @@ function videoUrl(video) {
       (Number(b.bit_rate) || Number(b.data_size) || 0) - (Number(a.bit_rate) || Number(a.data_size) || 0),
   );
   for (const rate of pool) {
-    const url = pickUrl(rate?.play_addr?.url_list || rate?.play_addr_h264?.url_list || [], "video");
-    if (url) return url;
+    for (const u of rate?.play_addr?.url_list || rate?.play_addr_h264?.url_list || []) push(u);
   }
-  return pickUrl(
-    video.play_addr_h264?.url_list || video.play_addr?.url_list || video.download_addr?.url_list || [],
-    "video",
-  );
+  for (const u of video.play_addr_h264?.url_list || []) push(u);
+  for (const u of video.play_addr?.url_list || []) push(u);
+  for (const u of video.download_addr?.url_list || []) push(u);
+  return urls;
+}
+
+function videoUrl(video) {
+  return videoCandidates(video)[0] || "";
 }
 
 function imageUrl(img) {
@@ -96,14 +115,15 @@ function mediaFrom(aweme) {
   for (const [i, img] of posts.entries()) {
     const still = imageUrl(img);
     if (still) images.push({ id: `${id}_${i}`, url: still });
-    const live = videoUrl(img.video) || pickUrl(img.clip?.url_list || [], "video");
-    if (live) videos.push({ id: `${id}_v${i}`, url: live });
+    const clips = videoCandidates(img.video);
+    const live = clips[0] || pickUrl(img.clip?.url_list || [], "video");
+    if (live) videos.push({ id: `${id}_v${i}`, url: live, urls: clips.length ? clips : [live] });
   }
   if (!isNote) {
     const cover = coverUrl(aweme.video);
-    const mainVideo = videoUrl(aweme.video);
+    const clips = videoCandidates(aweme.video);
     if (cover) images.push({ id: `${id}_still`, url: cover });
-    if (mainVideo) videos.push({ id: `${id}_v`, url: mainVideo });
+    if (clips.length) videos.push({ id: `${id}_v`, url: clips[0], urls: clips });
   }
   let kind = "album";
   if (isNote) {

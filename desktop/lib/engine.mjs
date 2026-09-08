@@ -25,7 +25,7 @@ export async function runWork({ work, folderName, files, rootPath, session, send
   for (const file of files || []) {
     if (controller.signal.aborted) break;
     if (file.status === "done" || results.get(file.key) === "done") continue;
-    if (!file.url) {
+    if (!file.url && !(file.urls || []).length) {
       results.set(file.key, "failed");
       send("cangxia:dl", { type: "file-fail", workId: work.id, fileKey: file.key });
       continue;
@@ -47,47 +47,61 @@ export async function runWork({ work, folderName, files, rootPath, session, send
       }
       await removePartial(dest);
     }
-    lastReceived = 0;
-    tickAt = Date.now();
-    try {
-      await transferToFile({
-        url: file.url,
-        dest,
-        session,
-        signal: controller.signal,
-        onProgress: (received, total) => {
-          const now = Date.now();
-          const dt = now - tickAt;
-          if (dt >= 300) {
-            speed = ((received - lastReceived) / dt) * 1000;
-            lastReceived = received;
-            tickAt = now;
-          }
-          send("cangxia:dl", {
-            type: "progress",
-            workId: work.id,
-            fileKey: file.key,
-            received,
-            total,
-            speed: Math.max(0, speed),
-          });
-        },
-      });
-      const kind = await sniffFile(dest);
-      if (file.type === "video" && kind !== "mp4" && kind !== "webm") {
-        throw new Error(`not-video:${kind}`);
+    const candidates = [...new Set([file.url, ...(file.urls || [])].filter(Boolean))];
+    if (!candidates.length) {
+      results.set(file.key, "failed");
+      send("cangxia:dl", { type: "file-fail", workId: work.id, fileKey: file.key });
+      continue;
+    }
+    let saved = false;
+    for (const url of candidates) {
+      if (controller.signal.aborted) break;
+      lastReceived = 0;
+      tickAt = Date.now();
+      try {
+        await transferToFile({
+          url,
+          dest,
+          session,
+          signal: controller.signal,
+          onProgress: (received, total) => {
+            const now = Date.now();
+            const dt = now - tickAt;
+            if (dt >= 300) {
+              speed = ((received - lastReceived) / dt) * 1000;
+              lastReceived = received;
+              tickAt = now;
+            }
+            send("cangxia:dl", {
+              type: "progress",
+              workId: work.id,
+              fileKey: file.key,
+              received,
+              total,
+              speed: Math.max(0, speed),
+            });
+          },
+        });
+        const kind = await sniffFile(dest);
+        if (file.type === "video" && kind !== "mp4" && kind !== "webm") {
+          throw new Error(`not-video:${kind}`);
+        }
+        if (file.type === "image" && (kind === "empty" || kind === "html")) {
+          throw new Error(`not-image:${kind}`);
+        }
+        saved = true;
+        results.set(file.key, "done");
+        send("cangxia:dl", { type: "file-done", workId: work.id, fileKey: file.key });
+        break;
+      } catch {
+        await removePartial(dest);
+        if (controller.signal.aborted) {
+          send("cangxia:dl", { type: "work-paused", workId: work.id });
+          return { paused: abortReason !== "cancel", aborted: true, reason: abortReason };
+        }
       }
-      if (file.type === "image" && (kind === "empty" || kind === "html")) {
-        throw new Error(`not-image:${kind}`);
-      }
-      results.set(file.key, "done");
-      send("cangxia:dl", { type: "file-done", workId: work.id, fileKey: file.key });
-    } catch {
-      await removePartial(dest);
-      if (controller.signal.aborted) {
-        send("cangxia:dl", { type: "work-paused", workId: work.id });
-        return { paused: abortReason !== "cancel", aborted: true, reason: abortReason };
-      }
+    }
+    if (!saved) {
       results.set(file.key, "failed");
       send("cangxia:dl", { type: "file-fail", workId: work.id, fileKey: file.key });
     }

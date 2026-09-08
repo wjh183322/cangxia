@@ -18,6 +18,7 @@ export interface WorkImage {
 export interface WorkVideo {
   id: string;
   url: string;
+  urls?: string[];
 }
 
 export interface Work {

@@ -750,6 +750,7 @@ ipcMain.handle("cangxia:download", async (_e, payload) => {
           name: `视频${i + 1}.mp4`,
           type: "video",
           url: clip.url,
+          urls: clip.urls || [clip.url],
           status: "waiting",
         })),
     ];
