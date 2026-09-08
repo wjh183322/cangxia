@@ -57,7 +57,7 @@ export function SettingsDialog() {
             />
           </label>
           <label className="block text-sm">
-            单次刷新最多条数
+            每个收藏夹每次最多读
             <input
               className="mt-1 h-11 w-full rounded-md border border-line bg-raised px-3 text-sm"
               type="number"
@@ -66,7 +66,9 @@ export function SettingsDialog() {
               value={settings.maxPerRefresh ?? 300}
               onChange={(e) => patchSettings({ maxPerRefresh: Math.max(20, Number(e.target.value) || 300) })}
             />
-            <span className="mt-1 block text-xs text-muted">默认 300。读完这一夹、或到上限、或连续几次没有新作品就会停。下次刷新接着认已有清单。</span>
+            <span className="mt-1 block text-xs text-muted">
+              默认每个夹 300 条，不是全部夹加起来 300。会先读总收藏，再逐个自建夹。下次刷新会跳过已有的、继续往下滚。
+            </span>
           </label>
         </div>
         <div className="mt-6 flex justify-end">

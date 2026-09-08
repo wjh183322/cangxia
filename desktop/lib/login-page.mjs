@@ -207,3 +207,37 @@ export const SCROLL_FEED_SCRIPT = `(() => {
   document.documentElement.scrollTop = document.documentElement.scrollHeight;
   return "window";
 })()`;
+
+export const LIST_SIDE_FOLDERS_SCRIPT = `(() => {
+  const textOf = (el) => (el.innerText || "").replace(/\\s+/g, " ").trim();
+  const skip = /新建收藏夹|^收藏夹$|^视频$|^音乐$|^合集$|^短剧$|^收藏$/;
+  const names = [];
+  for (const el of document.querySelectorAll("span, div, p, a")) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 24 || r.height < 12 || r.top < 140 || r.left > 460) continue;
+    if (el.childElementCount > 8) continue;
+    const t = textOf(el);
+    if (!t || skip.test(t) || t.length > 30) continue;
+    const name = t.replace(/\\d{1,5}$/, "").trim();
+    if (name.length >= 1) names.push(name);
+  }
+  return [...new Set(names)];
+})()`;
+
+export function clickSideFolderScript(name) {
+  return `(() => {
+    const want = ${JSON.stringify(name)};
+    const textOf = (el) => (el.innerText || "").replace(/\\s+/g, "");
+    const nodes = [...document.querySelectorAll("span, div, p, a, li")];
+    const hit = nodes.find((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.width < 12 || r.left > 480 || r.top < 120) return false;
+      const t = textOf(el);
+      return t === want || t.startsWith(want);
+    });
+    if (!hit) return "none";
+    (hit.closest("a, button, li") || hit).click();
+    return "clicked";
+  })()`;
+}
+

@@ -6,7 +6,7 @@ import { collectAwemes, mapAweme, mapFolder } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, SCROLL_FEED_SCRIPT, isHttpUrl } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, SCROLL_FEED_SCRIPT, LIST_SIDE_FOLDERS_SCRIPT, clickSideFolderScript, isHttpUrl } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -192,41 +192,90 @@ async function completeRefresh() {
   send("cangxia:progress", { active: false, current: 0, total: 0, message: "" });
 }
 
-async function runRefreshLoop(win, max) {
-  await sleep(800);
-  let last = 0;
+function countInFolder(folderId) {
+  let n = 0;
+  for (const w of captured.values()) {
+    if (w.folderId === folderId || (w.alsoInFolderIds || []).includes(folderId)) n += 1;
+  }
+  return n;
+}
+
+async function scrollUntilCap(win, { folderId, folderName, max, started }) {
+  let last = captured.size;
   let idle = 0;
-  let favTries = 0;
   while (win && !win.isDestroyed() && !refreshStop) {
     while (refreshPaused && !refreshStop) await sleep(400);
-    if (refreshStop || !win || win.isDestroyed()) break;
-    const n = captured.size;
+    if (refreshStop || !win || win.isDestroyed()) return;
+    const inFolder = folderId ? countInFolder(folderId) - started : captured.size - started;
     send("cangxia:progress", {
       active: true,
-      current: Math.min(n, max),
-      total: max,
-      message: n === 0 ? "正在打开「收藏」页…" : `正在读取收藏 ${n}/${max}`,
+      current: captured.size,
+      total: Math.max(max, captured.size),
+      message: `正在读「${folderName}」本夹 ${Math.max(0, inFolder)}/${max} · 合计 ${captured.size}`,
     });
-    if (n >= max) break;
+    if (inFolder >= max) return;
     try {
-      const tab = await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-      if (n === 0 && tab !== "already") {
-        favTries += 1;
-        if (favTries <= 12) {
-          await sleep(1100);
-          continue;
-        }
-      }
       await win.webContents.executeJavaScript(SCROLL_FEED_SCRIPT);
     } catch {
-      break;
+      return;
     }
     await sleep(1400);
     if (captured.size === last) idle += 1;
     else idle = 0;
     last = captured.size;
-    if (last > 0 && idle >= 5) break;
-    if (last === 0 && idle >= 10) break;
+    if (idle >= 5) return;
+  }
+}
+
+async function runRefreshLoop(win, max) {
+  await sleep(800);
+  let favTries = 0;
+  while (win && !win.isDestroyed() && !refreshStop && favTries < 14) {
+    try {
+      const tab = await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+      send("cangxia:progress", {
+        active: true,
+        current: captured.size,
+        total: max,
+        message: "正在打开「收藏」页…",
+      });
+      if (tab === "already" || captured.size > 0) break;
+    } catch {
+      break;
+    }
+    favTries += 1;
+    await sleep(1100);
+  }
+
+  const defaultStart = captured.size;
+  await scrollUntilCap(win, { folderId: null, folderName: "全部收藏", max, started: defaultStart });
+
+  let names = folders.filter((f) => !f.isDefault).map((f) => f.name);
+  if (!names.length) {
+    try {
+      const listed = await win.webContents.executeJavaScript(LIST_SIDE_FOLDERS_SCRIPT);
+      if (Array.isArray(listed)) names = listed.filter(Boolean);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  for (const name of names) {
+    if (!win || win.isDestroyed() || refreshStop) break;
+    const folder = folders.find((f) => f.name === name);
+    const started = folder ? countInFolder(folder.id) : captured.size;
+    try {
+      await win.webContents.executeJavaScript(clickSideFolderScript(name));
+    } catch {
+      continue;
+    }
+    await sleep(1200);
+    await scrollUntilCap(win, {
+      folderId: folder?.id || null,
+      folderName: name,
+      max,
+      started,
+    });
   }
   await completeRefresh();
 }

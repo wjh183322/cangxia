@@ -466,7 +466,7 @@ export const useApp = create<AppState>()(
               active: true,
               current: 0,
               total: get().settings.maxPerRefresh || 300,
-              message: `正在读取收藏，最多 ${get().settings.maxPerRefresh || 300} 条，可随时停止`,
+              message: `每个收藏夹最多 ${get().settings.maxPerRefresh || 300} 条，会逐个夹读取`,
             },
             syncingBrowser: true,
           });
