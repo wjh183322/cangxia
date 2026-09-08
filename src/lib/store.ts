@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { DEMO_USER, FOLDERS, PENDING_REFRESH_WORK, WORKS } from "./demo-data";
+import { DEMO_USER, FOLDERS, PENDING_REFRESH_WORK, WORKS, isDemoWork } from "./demo-data";
 import { desktop } from "./desktop";
 import {
   cancelNeedsConfirm,
@@ -112,6 +112,26 @@ const defaultSettings: Settings = {
   maxPerRefresh: 300,
 };
 
+function emptyFolders(): Folder[] {
+  return [{ id: "default", name: "收藏", isDefault: true }];
+}
+
+function liveDesktop() {
+  return typeof window !== "undefined" && Boolean(window.cangxia);
+}
+
+function stripDemoState<T extends { works?: Work[]; folders?: Folder[]; folderId?: string; dlTasks?: DlTask[] }>(state: T) {
+  const works = (state.works || []).filter((w) => !isDemoWork(w));
+  const keep = new Set(works.map((w) => w.folderId));
+  for (const w of works) for (const id of w.alsoInFolderIds || []) keep.add(id);
+  let folders = (state.folders || []).filter((f) => f.isDefault || keep.has(f.id));
+  if (!folders.some((f) => f.isDefault)) folders = [...emptyFolders(), ...folders];
+  if (!folders.length) folders = emptyFolders();
+  const folderId = folders.some((f) => f.id === state.folderId) ? state.folderId : folders[0].id;
+  const dlTasks = (state.dlTasks || []).filter((t) => !isDemoWork({ id: t.workId, coverUrl: t.coverUrl }));
+  return { ...state, works, folders, folderId, dlTasks };
+}
+
 function inFolder(work: Work, folderId: string) {
   return work.folderId === folderId || work.alsoInFolderIds.includes(folderId);
 }
@@ -126,8 +146,8 @@ export const useApp = create<AppState>()(
   persist(
     (set, get) => ({
       loggedIn: false,
-      folders: FOLDERS,
-      works: WORKS,
+      folders: liveDesktop() ? emptyFolders() : FOLDERS,
+      works: liveDesktop() ? [] : WORKS,
       tab: "collect",
       folderId: "default",
       kind: "album",
@@ -169,7 +189,17 @@ export const useApp = create<AppState>()(
         const api = desktop();
         if (api) {
           const res = await api.login();
-          if (res.ok && res.account) set({ loggedIn: true, account: res.account });
+          if (res.ok && res.account) {
+            const cleaned = stripDemoState(get());
+            set({
+              loggedIn: true,
+              account: res.account,
+              works: cleaned.works,
+              folders: cleaned.folders,
+              folderId: cleaned.folderId,
+              dlTasks: cleaned.dlTasks,
+            });
+          }
           return;
         }
         set({ loggedIn: true, account: DEMO_USER });
@@ -468,9 +498,10 @@ export const useApp = create<AppState>()(
         await api.stopRefresh();
       },
       applyRefreshResult: (folders, works) => {
+        const existing = liveDesktop() ? get().works.filter((w) => !isDemoWork(w)) : get().works;
         set({
           folders: folders.length ? folders : get().folders,
-          works: mergeIncoming(get().works, works),
+          works: mergeIncoming(existing, works),
           syncingBrowser: false,
           job: { active: false, current: 0, total: 0, message: "" },
         });
@@ -563,6 +594,13 @@ export const useApp = create<AppState>()(
         state.dlPauseAll = false;
         state.dlSpeed = 0;
         state.dlOpen = false;
+        if (liveDesktop()) {
+          const cleaned = stripDemoState(state);
+          state.works = cleaned.works;
+          state.folders = cleaned.folders;
+          state.folderId = cleaned.folderId;
+          state.dlTasks = hydrateTasks(cleaned.dlTasks || []);
+        }
       },
     },
   ),

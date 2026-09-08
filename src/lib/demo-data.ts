@@ -384,3 +384,11 @@ export const PENDING_REFRESH_WORK: Work = {
   videos: [],
   images: [{ id: "j1", url: "/covers/c11.jpg" }],
 };
+
+export const DEMO_WORK_IDS = new Set([...WORKS.map((w) => w.id), PENDING_REFRESH_WORK.id]);
+
+export function isDemoWork(work: { id: string; coverUrl?: string }) {
+  if (DEMO_WORK_IDS.has(work.id)) return true;
+  const cover = work.coverUrl || "";
+  return cover.startsWith("/covers/") || cover.startsWith("/videos/");
+}
