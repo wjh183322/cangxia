@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell,
 import { join } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { readIndex, deleteWorkFolders, workDir, relocateWorkFolder } from "./lib/layout.mjs";
+import { readIndex, deleteWorkFolders, workDir, relocateWorkFolder, exists } from "./lib/layout.mjs";
 import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, unwrapAweme } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
@@ -1541,6 +1541,21 @@ ipcMain.handle("cangxia:open-list-file", async () => {
   if (!file) return { ok: false };
   await shell.showItemInFolder(file);
   return { ok: true };
+});
+
+ipcMain.handle("cangxia:file-status", async (_e, ids = []) => {
+  const root = String(settings.rootPath || "").trim();
+  if (!root) return { present: [] };
+  const index = await readIndex(root);
+  const recs = new Map((index.records || []).map((r) => [String(r.id), r]));
+  const present = [];
+  for (const raw of ids) {
+    const id = String(raw || "");
+    if (!id) continue;
+    const dir = recs.get(id)?.dir;
+    if (dir && (await exists(dir))) present.push(id);
+  }
+  return { present };
 });
 
 ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {

@@ -99,6 +99,7 @@ interface AppState {
   askDelete: (ids: string[]) => void;
   cancelDelete: () => void;
   confirmDelete: () => Promise<void>;
+  syncDownloadedFromDisk: () => Promise<void>;
   setDlOpen: (open: boolean) => void;
   pauseDlTask: (id: string) => void;
   resumeDlTask: (id: string) => void;
@@ -425,6 +426,7 @@ export const useApp = create<AppState>()(
           filterReturnWorkId:
             s.filterReturnWorkId && ids.includes(s.filterReturnWorkId) ? null : s.filterReturnWorkId,
         }));
+        void get().syncDownloadedFromDisk();
       },
 
       setDlOpen: (dlOpen) => set({ dlOpen }),
@@ -646,6 +648,25 @@ export const useApp = create<AppState>()(
           syncingBrowser: false,
           job: { active: false, current: 0, total: 0, message: "" },
         });
+        void get().syncDownloadedFromDisk();
+      },
+      syncDownloadedFromDisk: async () => {
+        const api = desktop();
+        if (!api?.fileStatus) return;
+        const ids = get()
+          .works.filter((w) => w.status === "downloaded" || w.status === "stale")
+          .map((w) => w.id);
+        if (!ids.length) return;
+        const res = await api.fileStatus(ids);
+        const have = new Set(res.present || []);
+        set((s) => ({
+          works: s.works.map((w) => {
+            if ((w.status === "downloaded" || w.status === "stale") && !have.has(w.id)) {
+              return { ...w, status: "new" as const, videoStatus: w.videos?.length ? "pending" : "none" };
+            }
+            return w;
+          }),
+        }));
       },
       openFolderPick: (list) => {
         const chosen = new Set(get().chosenFolderIds || []);

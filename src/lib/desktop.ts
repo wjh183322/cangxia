@@ -25,6 +25,7 @@ export interface DesktopApi {
     chosenFolderIds: string[];
   }) => Promise<{ ok: boolean; path?: string; error?: string }>;
   openListFile: () => Promise<{ ok: boolean }>;
+  fileStatus: (ids: string[]) => Promise<{ present: string[] }>;
   refresh: (opts?: {
     folderName?: string;
     knownIds?: string[];

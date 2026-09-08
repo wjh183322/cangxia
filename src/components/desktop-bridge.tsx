@@ -44,6 +44,7 @@ export function DesktopBridge() {
     });
     const offDl = api.onDl((ev) => applyDesktopDlEvent(ev as Parameters<typeof applyDesktopDlEvent>[0]));
     void api.setSettings(useApp.getState().settings);
+    void useApp.getState().syncDownloadedFromDisk();
     let saveTimer = 0;
     const unsub = useApp.subscribe((s) => {
       window.clearTimeout(saveTimer);
