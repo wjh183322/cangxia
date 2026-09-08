@@ -29,6 +29,7 @@ let settings = { rootPath: "", pushplusToken: "", wxpusherSpt: "", maxPerRefresh
 let refreshStop = false;
 let refreshPaused = false;
 let refreshReading = false;
+let readingFolderName = "";
 let readChoiceResolve = null;
 let loginWaiting = false;
 let captchaLock = false;
@@ -236,12 +237,15 @@ function ingestPayload(url, json) {
     const prev = captured.get(work.id);
     if (prev) {
       work.listIndex = prev.listIndex;
+      work.allIndex = prev.allIndex;
+      if (readingFolderName === "收藏") work.allIndex = prev.allIndex ?? captured.size;
       if (prev.folderId !== work.folderId) {
         work.alsoInFolderIds = [...new Set([...(prev.alsoInFolderIds || []), prev.folderId])];
         work.folderId = prev.folderId;
       }
     } else {
       work.listIndex = captured.size;
+      if (readingFolderName === "收藏") work.allIndex = captured.size;
     }
     captured.set(work.id, work);
   }
@@ -262,6 +266,7 @@ async function snapshotWorks() {
 
 async function completeRefresh() {
   refreshReading = false;
+  readingFolderName = "";
   closeProgressWindow();
   const snap = await snapshotWorks();
   send("cangxia:refresh-done", snap);
@@ -416,6 +421,7 @@ async function watchAndRead(win, max) {
       if (refreshStop || !win || win.isDestroyed()) break;
       if (yes) {
         refreshReading = true;
+        readingFolderName = state.name || "收藏";
         const folder = folders.find((f) => f.name === state.name);
         const started = folder ? countInFolder(folder.id) : captured.size;
         await scrollUntilCap(win, {

@@ -18,6 +18,8 @@ export function AppShell() {
   const folders = useApp((s) => s.folders);
   const folderId = useApp((s) => s.folderId);
   const setFolder = useApp((s) => s.setFolder);
+  const libraryFolderId = useApp((s) => s.libraryFolderId);
+  const setLibraryFolder = useApp((s) => s.setLibraryFolder);
   const works = useApp((s) => s.works);
   const hiddenCollectIds = useApp((s) => s.hiddenCollectIds);
   const refresh = useApp((s) => s.refresh);
@@ -105,15 +107,37 @@ export function AppShell() {
       )}
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        {tab === "collect" && (
+        {(tab === "collect" || tab === "library") && (
           <aside className="flex gap-2 overflow-x-auto border-b border-line p-3 md:w-52 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
+            {tab === "library" && (
+              <button
+                type="button"
+                onClick={() => setLibraryFolder("all")}
+                className={`flex min-h-11 shrink-0 items-center gap-2 rounded-md px-3 text-left text-sm ${
+                  libraryFolderId === "all" ? "bg-raised text-fg" : "text-muted hover:bg-raised/60"
+                }`}
+              >
+                <FolderClosed className="size-4 shrink-0" />
+                <span className="truncate">全部</span>
+                <span className="ml-auto tabular-nums text-xs text-subtle">
+                  {works.filter((w) => w.status === "downloaded" || w.status === "stale").length}
+                </span>
+              </button>
+            )}
             {folders.map((folder) => {
-              const count = works.filter(
-                (w) =>
-                  !hiddenCollectIds.includes(w.id) &&
-                  (w.folderId === folder.id || w.alsoInFolderIds.includes(folder.id)),
-              ).length;
-              const active = folderId === folder.id;
+              const count =
+                tab === "library"
+                  ? works.filter(
+                      (w) =>
+                        (w.status === "downloaded" || w.status === "stale") &&
+                        (w.folderId === folder.id || w.alsoInFolderIds.includes(folder.id)),
+                    ).length
+                  : works.filter(
+                      (w) =>
+                        !hiddenCollectIds.includes(w.id) &&
+                        (w.folderId === folder.id || w.alsoInFolderIds.includes(folder.id)),
+                    ).length;
+              const active = tab === "library" ? libraryFolderId === folder.id : folderId === folder.id;
               return (
                 <div
                   key={folder.id}
@@ -123,24 +147,26 @@ export function AppShell() {
                 >
                   <button
                     type="button"
-                    onClick={() => setFolder(folder.id)}
+                    onClick={() => (tab === "library" ? setLibraryFolder(folder.id) : setFolder(folder.id))}
                     className="flex min-w-0 flex-1 items-center gap-2 px-1 py-2 text-left"
                   >
                     <FolderClosed className="size-4 shrink-0" />
                     <span className="truncate">{folder.name}</span>
                     <span className="ml-auto tabular-nums text-xs text-subtle">{count}</span>
                   </button>
-                  <button
-                    type="button"
-                    className="flex size-8 shrink-0 items-center justify-center rounded-sm text-subtle hover:bg-surface hover:text-fg"
-                    aria-label={`删除${folder.name}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      askDeleteFolder(folder.id);
-                    }}
-                  >
-                    <X className="size-3.5" />
-                  </button>
+                  {tab === "collect" && (
+                    <button
+                      type="button"
+                      className="flex size-8 shrink-0 items-center justify-center rounded-sm text-subtle hover:bg-surface hover:text-fg"
+                      aria-label={`删除${folder.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        askDeleteFolder(folder.id);
+                      }}
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  )}
                 </div>
               );
             })}

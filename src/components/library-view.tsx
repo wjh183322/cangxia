@@ -6,7 +6,7 @@ import { TagPickerDialog } from "@/components/tag-picker-dialog";
 import { VideoPlayer } from "@/components/video-player";
 import { Button } from "@/components/ui/button";
 import { isDesktop } from "@/lib/desktop";
-import { useApp } from "@/lib/store";
+import { inFolder, useApp } from "@/lib/store";
 import type { Work } from "@/lib/types";
 import { folderTitle, kindChip, matchesKind, videoStatusOf, workVideos } from "@/lib/utils";
 
@@ -32,6 +32,7 @@ export function LibraryView() {
   const filterUserTag = useApp((s) => s.filterUserTag);
   const setFilters = useApp((s) => s.setFilters);
   const folders = useApp((s) => s.folders);
+  const libraryFolderId = useApp((s) => s.libraryFolderId);
   const setViewerIndex = useApp((s) => s.setViewerIndex);
   const addUserTag = useApp((s) => s.addUserTag);
   const applyTagFilter = useApp((s) => s.applyTagFilter);
@@ -53,20 +54,25 @@ export function LibraryView() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTab, setPickerTab] = useState<"topic" | "user">("topic");
 
-  const downloaded = works.filter(
-    (w) => matchesKind(w, kind) && (w.status === "downloaded" || w.status === "stale"),
-  );
+  const downloaded = works.filter((w) => {
+    if (!(w.status === "downloaded" || w.status === "stale")) return false;
+    if (!matchesKind(w, kind)) return false;
+    if (libraryFolderId !== "all" && !inFolder(w, libraryFolderId)) return false;
+    return true;
+  });
   const topicOptions = useMemo(() => tagOptions(downloaded, "hashtags"), [downloaded]);
   const userTagOptions = useMemo(() => tagOptions(downloaded, "userTags"), [downloaded]);
 
   const filtered = useMemo(() => {
+    const rank = (w: Work) =>
+      libraryFolderId === "all" ? (w.allIndex ?? w.listIndex ?? 1e12) : (w.listIndex ?? 1e12);
     return downloaded
       .filter((w) => !filterAuthor || w.authorName.includes(filterAuthor))
       .filter((w) => !filterDouyin || w.douyinId.includes(filterDouyin))
       .filter((w) => !filterTag || w.hashtags.includes(filterTag))
       .filter((w) => !filterUserTag || w.userTags.includes(filterUserTag))
-      .sort((a, b) => b.collectedAt - a.collectedAt);
-  }, [downloaded, filterAuthor, filterDouyin, filterTag, filterUserTag]);
+      .sort((a, b) => rank(a) - rank(b) || b.collectedAt - a.collectedAt);
+  }, [downloaded, filterAuthor, filterDouyin, filterTag, filterUserTag, libraryFolderId]);
 
   const work = downloaded.find((w) => w.id === libraryWorkId) ?? null;
   const folderName = folders.find((f) => f.id === work?.folderId)?.name;

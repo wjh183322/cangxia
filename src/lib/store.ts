@@ -23,6 +23,7 @@ interface AppState {
   works: Work[];
   tab: AppTab;
   folderId: string;
+  libraryFolderId: string;
   kind: KindFilter;
   selectedIds: string[];
   rangeFrom: string;
@@ -68,6 +69,7 @@ interface AppState {
   skipLoginGate: () => void;
   setTab: (tab: AppTab) => void;
   setFolder: (id: string) => void;
+  setLibraryFolder: (id: string) => void;
   setKind: (kind: KindFilter) => void;
   toggleSelect: (id: string) => void;
   clearSelect: () => void;
@@ -149,6 +151,8 @@ function inFolder(work: Work, folderId: string) {
   return work.folderId === folderId || work.alsoInFolderIds.includes(folderId);
 }
 
+export { inFolder };
+
 export function listWorks(works: Work[], folderId: string, kind: KindFilter, hiddenIds: string[] = []) {
   const hidden = new Set(hiddenIds);
   return works
@@ -164,6 +168,7 @@ export const useApp = create<AppState>()(
       works: liveDesktop() ? [] : WORKS,
       tab: "collect",
       folderId: "default",
+      libraryFolderId: "all",
       kind: "album",
       selectedIds: [],
       rangeFrom: "1",
@@ -269,6 +274,7 @@ export const useApp = create<AppState>()(
           deleteIds: [],
         }),
       setFolder: (folderId) => set({ folderId, selectedIds: [] }),
+      setLibraryFolder: (libraryFolderId) => set({ libraryFolderId, tidyIds: [] }),
       setKind: (kind) => set({ kind, selectedIds: [], browseMediaIndex: 0, tidyIds: [] }),
       toggleSelect: (id) =>
         set((s) => ({
@@ -588,6 +594,7 @@ export const useApp = create<AppState>()(
           works,
           folders,
           folderId,
+          libraryFolderId: get().libraryFolderId === id ? "all" : get().libraryFolderId,
           hiddenCollectIds: [...new Set([...get().hiddenCollectIds, ...hideIds])],
           deletedFolderIds: [...new Set([...get().deletedFolderIds, id])],
           pendingFolderDeleteId: null,
@@ -672,6 +679,7 @@ export const useApp = create<AppState>()(
         settings: s.settings,
         account: s.account,
         folderId: s.folderId,
+        libraryFolderId: s.libraryFolderId,
         kind: s.kind,
         tab: s.tab,
         dlTasks: s.dlTasks,
@@ -694,6 +702,7 @@ export const useApp = create<AppState>()(
         state.hiddenCollectIds = state.hiddenCollectIds || [];
         state.deletedFolderIds = state.deletedFolderIds || [];
         state.pendingFolderDeleteId = null;
+        if (!state.libraryFolderId) state.libraryFolderId = "all";
         state.loginGate = false;
         state.pendingReadAfterLogin = false;
       },
@@ -722,6 +731,7 @@ function mergeIncoming(existing: Work[], incoming: Work[]) {
       videoStatus: videoStatusOf(prev) === "saved" ? "saved" : w.videoStatus ?? videoStatusOf(prev),
       alsoInFolderIds: [...new Set([...(prev.alsoInFolderIds || []), ...w.alsoInFolderIds])],
       listIndex: w.listIndex ?? prev.listIndex,
+      allIndex: w.allIndex ?? prev.allIndex,
     });
   }
   for (const prev of existing) {
