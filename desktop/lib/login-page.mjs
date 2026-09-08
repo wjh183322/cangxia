@@ -296,6 +296,16 @@ export function folderInsideScript(name) {
   })()`;
 }
 
+export const WORK_GRID_POINT_SCRIPT = `(() => {
+  const cards = [...document.querySelectorAll("a[href*='/video'], a[href*='/note'], a[href*='/aweme']")].filter((el) => {
+    const r = el.getBoundingClientRect();
+    return r.width >= 120 && r.height >= 140 && r.left > 260 && r.top > 160 && r.bottom < innerHeight;
+  });
+  if (!cards[0]) return { x: 760, y: 520 };
+  const r = cards[0].getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+})()`;
+
 export const SCROLL_FEED_SCRIPT = `(() => {
   const step = 380;
   const isScrollable = (el) => {

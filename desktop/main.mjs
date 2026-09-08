@@ -6,7 +6,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -400,16 +400,27 @@ async function openFavoriteFresh(win) {
 
 async function wheelBurst(win) {
   const wc = win.webContents;
-  wc.sendInputEvent({ type: "mouseMove", x: 640, y: 420 });
+  let x = 760;
+  let y = 520;
+  try {
+    const pt = await wc.executeJavaScript(WORK_GRID_POINT_SCRIPT);
+    if (pt?.x && pt?.y) {
+      x = pt.x;
+      y = pt.y;
+    }
+  } catch {
+    /* keep default */
+  }
+  wc.sendInputEvent({ type: "mouseMove", x, y });
   await sleep(80);
   for (let i = 0; i < 6; i++) {
     if (refreshStop || !win || win.isDestroyed()) return;
     wc.sendInputEvent({
       type: "mouseWheel",
-      x: 640,
-      y: 420,
+      x,
+      y,
       deltaX: 0,
-      deltaY: 900,
+      deltaY: 1200,
       canScroll: true,
     });
     await sleep(600);
@@ -477,7 +488,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   try {
     await openFavoriteFresh(win);
     if (folderName && folderName !== "收藏") {
-      refreshReading = false;
+      refreshReading = true;
       const how = await openNamedFolder(win, folderName);
       if (how === "none") {
         send("cangxia:progress", {
@@ -488,13 +499,19 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
         });
         return;
       }
-      refreshReading = true;
       send("cangxia:progress", {
         active: true,
-        current: 0,
+        current: Math.min(countProgress(folderId, folderName, started), max),
         total: max,
-        message: `已进入「${folderName}」，开始读取 0/${max}`,
+        message: `已进入「${folderName}」，开始读取`,
       });
+      if (countProgress(folderId, folderName, started) === 0) {
+        try {
+          await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
+        } catch {
+          /* ignore */
+        }
+      }
     } else {
       refreshReading = true;
       await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
@@ -623,7 +640,7 @@ async function watchAndRead(win, max) {
       const yes = await askReadFolder(state.name);
       if (refreshStop || !win || win.isDestroyed()) break;
       if (yes) {
-        refreshReading = readingFolderName === "收藏";
+        refreshReading = true;
         readingFolderName = state.name || "收藏";
         const folder = ensureFolder(readingFolderName);
         readingFolderId = folder.id;
