@@ -573,12 +573,11 @@ export const useApp = create<AppState>()(
           await api.listFolders();
           return;
         }
-        const demo = get().folders.filter((f) => !f.isDefault).map((f) => ({ id: f.id, name: f.name }));
-        set({
-          pendingFolderPick: demo.length ? demo : [{ id: "folder_demo", name: "雷电将军" }],
-          folderPickChecked: get().chosenFolderIds,
-          job: { active: false, current: 0, total: 0, message: "" },
-        });
+        const demo = [
+          ...get().folders.filter((f) => !f.isDefault).map((f) => ({ id: f.id, name: f.name })),
+          { id: "folder_new_demo", name: "新收藏夹示例" },
+        ];
+        get().openFolderPick(demo);
       },
 
       finishRefresh: async () => {
@@ -635,11 +634,16 @@ export const useApp = create<AppState>()(
         });
       },
       openFolderPick: (list) => {
-        const visible = new Set(get().chosenFolderIds);
-        const checked = list.filter((f) => visible.has(f.id) || visible.has(f.name)).map((f) => f.id);
+        const chosen = new Set(get().chosenFolderIds || []);
+        const visible = get().folders.filter(
+          (f) => !f.isDefault && (chosen.has(f.id) || chosen.has(f.name)),
+        );
+        const skipName = new Set(visible.map((f) => f.name));
+        const skipId = new Set(visible.map((f) => f.id));
+        const pending = (list || []).filter((f) => !skipName.has(f.name) && !skipId.has(f.id));
         set({
-          pendingFolderPick: list,
-          folderPickChecked: checked.length ? checked : [],
+          pendingFolderPick: pending,
+          folderPickChecked: [],
           syncingBrowser: false,
           job: { active: false, current: 0, total: 0, message: "" },
         });
@@ -665,7 +669,8 @@ export const useApp = create<AppState>()(
             folders = [...folders, { id: f.id, name: f.name, isDefault: false }];
           }
         }
-        const chosenFolderIds = selected.map((f) => folders.find((x) => x.id === f.id || x.name === f.name)?.id || f.id);
+        const added = selected.map((f) => folders.find((x) => x.id === f.id || x.name === f.name)?.id || f.id);
+        const chosenFolderIds = [...new Set([...(get().chosenFolderIds || []), ...added])];
         const folderId = folders.some((f) => f.id === get().folderId && (f.isDefault || chosenFolderIds.includes(f.id)))
           ? get().folderId
           : "default";

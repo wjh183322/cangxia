@@ -26,12 +26,12 @@ export function FolderPickDialog() {
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-bg/70 p-4 sm:items-center">
       <div className="flex max-h-[min(80dvh,640px)] w-full max-w-md flex-col rounded-xl border border-line bg-surface p-6">
         <p className="text-xs font-medium text-muted">读取收藏夹</p>
-        <h2 className="mt-2 text-lg font-semibold">选择要显示的收藏夹</h2>
+        <h2 className="mt-2 text-lg font-semibold">选择要加入左侧的收藏夹</h2>
         <p className="mt-2 text-sm leading-relaxed text-muted">
-          没勾的夹不会出现在左侧。作品仍按总收藏读取；等你以后读这个夹，再归进对应文件夹。
+          这里只列出左侧还没有的夹。已在左侧的不会出现。
         </p>
         {list.length === 0 ? (
-          <p className="mt-4 text-sm text-muted">没有读到自建收藏夹。</p>
+          <p className="mt-4 text-sm text-muted">没有新的自建收藏夹。左侧已有的夹不会再列出来。</p>
         ) : (
           <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-md border border-line">
             {list.map((f) => {
@@ -52,7 +52,7 @@ export function FolderPickDialog() {
           <Button className="flex-1" variant="secondary" onClick={() => setAll(!allOn)} disabled={!list.length}>
             {allOn ? "取消全选" : "全选"}
           </Button>
-          <Button className="flex-1" onClick={() => confirm()} disabled={!list.length && checked.length === 0}>
+          <Button className="flex-1" onClick={() => confirm()}>
             确定（{checked.length}）
           </Button>
           <Button className="flex-1" variant="ghost" onClick={() => cancel()}>
