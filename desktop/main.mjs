@@ -508,23 +508,16 @@ async function drainPageFeeds(win) {
 
 async function waitForNewItems(prevCount, timeoutMs, folderName, folderId, started, max) {
   const t0 = Date.now();
-  let last = countProgress(folderId, folderName, started);
-  let lastChange = Date.now();
   while (Date.now() - t0 < timeoutMs && !refreshStop) {
     const got = countProgress(folderId, folderName, started);
     send("cangxia:progress", {
       active: true,
       current: Math.min(got, max),
       total: max,
-      message: `正在读取「${folderName}」 ${got}/${max}`,
+      message: `正在读取「${folderName}」 ${got}/${max}${skippedIds.size ? `，清单已有 ${skippedIds.size} 条先跳过` : ""}`,
     });
     if (got >= max) return true;
     await sleep(200);
-    if (got !== last) {
-      last = got;
-      lastChange = Date.now();
-    }
-    if (got > prevCount && Date.now() - lastChange > 800) return true;
   }
   return countProgress(folderId, folderName, started) > prevCount;
 }
@@ -1026,7 +1019,7 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
   });
   await drainPageFeeds(win);
   let got = countProgress(folderId, folderName, started);
-  if (got < max) await waitForNewItems(got, 5000, folderName, folderId, started, max);
+  if (got < max) await waitForNewItems(got, 8000, folderName, folderId, started, max);
   got = countProgress(folderId, folderName, started);
   if (got >= max) return got;
   let idle = 0;
@@ -1038,24 +1031,22 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
       active: true,
       current: Math.min(got, max),
       total: max,
-      message: `正在读取「${folderName}」新增 ${got}/${max}${skippedIds.size ? `，清单已有 ${skippedIds.size} 条先跳过` : ""}`,
+      message: `正在读取「${folderName}」 ${got}/${max}${skippedIds.size ? `，清单已有 ${skippedIds.size} 条先跳过` : ""}`,
     });
     if (got >= max) break;
-    if (!readingHasMore && got > 0) break;
     const before = got;
     const skipBefore = skippedIds.size;
     await drainPageFeeds(win);
     await wheelBurst(win);
     await drainPageFeeds(win);
-    const grew = await waitForNewItems(before, 2500, folderName, folderId, started, max);
+    const grew = await waitForNewItems(before, 3500, folderName, folderId, started, max);
     await drainPageFeeds(win);
     got = countProgress(folderId, folderName, started);
     if (got >= max) break;
     if (grew || skippedIds.size > skipBefore) idle = 0;
     else idle += 1;
-    if (idle >= 4 && got > 0) break;
-    if (idle >= 12 && !readingHasMore) break;
-    if (idle >= 16) break;
+    if (!readingHasMore && idle >= 6) break;
+    if (idle >= 20) break;
   }
   return countProgress(folderId, folderName, started);
 }
@@ -1121,7 +1112,6 @@ async function openNamedFolder(win, folderName, { skipNav = false } = {}) {
 }
 
 async function scrollUntilCap(win, { folderId, folderName, max, started }) {
-  readingOrder = 0;
   readingHasMore = true;
   seenThisRead = new Set();
   readingCollectsId = folderName === "收藏" ? "" : folderIdByName(folderName);
