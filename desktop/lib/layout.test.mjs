@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ensureWorkFolder, readIndex, writeIndex, folderTitle, deleteWorkFolders, exists } from "./layout.mjs";
-import { mapAweme, collectAwemes, mergeWorks } from "./aweme.mjs";
+import { mapAweme, collectAwemes, mergeWorks, isCollectFeedUrl } from "./aweme.mjs";
 
 test("folderTitle strips illegal chars and keeps id", () => {
   assert.equal(folderTitle("a/b:c|d", "123"), "abcd_123");
@@ -152,6 +152,13 @@ test("collectAwemes unwraps aweme_info and keeps list order", () => {
   assert.equal(list[0].aweme_id, "top");
   assert.equal(list[1].aweme_id, "second");
   assert.equal(list[0]._collect_time, 9);
+});
+
+test("isCollectFeedUrl only matches favorite feeds", () => {
+  assert.equal(isCollectFeedUrl("https://www.douyin.com/aweme/v1/web/aweme/listcollection/"), true);
+  assert.equal(isCollectFeedUrl("https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=1"), true);
+  assert.equal(isCollectFeedUrl("https://www.douyin.com/aweme/v1/web/collects/list/"), false);
+  assert.equal(isCollectFeedUrl("https://www.douyin.com/aweme/v1/web/tab/feed/"), false);
 });
 
 test("mergeWorks keeps user tags and downloaded", () => {

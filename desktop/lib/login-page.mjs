@@ -193,26 +193,39 @@ export const OPEN_FAVORITE_SCRIPT = `(() => {
 })()`;
 
 export const SCROLL_FEED_SCRIPT = `(() => {
-  const boxes = [...document.querySelectorAll("div")].filter((el) => {
+  const step = 380;
+  const isScrollable = (el) => {
     const st = getComputedStyle(el);
-    return (st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") && el.scrollHeight > el.clientHeight + 80;
+    return (st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") && el.scrollHeight > el.clientHeight + 40;
+  };
+  const cards = [...document.querySelectorAll("a[href*='/video'], a[href*='/note'], a[href*='/aweme']")].filter((el) => {
+    const r = el.getBoundingClientRect();
+    return r.width >= 120 && r.width <= 520 && r.height >= 140 && r.height <= 640;
   });
-  boxes.sort((a, b) => b.clientHeight - a.clientHeight);
-  const box = boxes[0];
-  const page = (el) => Math.max(240, Math.round((el.clientHeight || innerHeight) * 0.8));
+  let box = null;
+  if (cards[0]) {
+    let el = cards[0].parentElement;
+    while (el && el !== document.documentElement) {
+      if (isScrollable(el) && el.clientHeight >= 280) {
+        box = el;
+        break;
+      }
+      el = el.parentElement;
+    }
+  }
   if (box) {
     const maxTop = box.scrollHeight - box.clientHeight;
-    const next = Math.min(maxTop, box.scrollTop + page(box));
-    if (next <= box.scrollTop + 4) return "end";
+    const next = Math.min(maxTop, box.scrollTop + step);
+    if (next <= box.scrollTop + 2) return "end";
     box.scrollTop = next;
-    return "page";
+    return "row";
   }
-  const maxTop = document.documentElement.scrollHeight - innerHeight;
   const cur = window.scrollY || document.documentElement.scrollTop;
-  const next = Math.min(maxTop, cur + page(document.documentElement));
-  if (next <= cur + 4) return "end";
+  const maxTop = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+  const next = Math.min(maxTop, cur + step);
+  if (next <= cur + 2) return "end";
   window.scrollTo(0, next);
-  return "page";
+  return "row";
 })()`;
 
 export const LIST_SIDE_FOLDERS_SCRIPT = `(() => {

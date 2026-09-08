@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell,
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readIndex, deleteWorkFolders, workDir } from "./lib/layout.mjs";
-import { collectAwemes, mapAweme, mapFolder } from "./lib/aweme.mjs";
+import { collectAwemes, isCollectFeedUrl, mapAweme, mapFolder } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
@@ -229,6 +229,7 @@ function ingestPayload(url, json) {
     }
   }
   if (!refreshReading) return;
+  if (!isCollectFeedUrl(url)) return;
   const awemes = collectAwemes(json);
   for (const aweme of awemes) {
     const folder = folders.find((f) => f.id === String(aweme.collects_id || "")) || folders[0];
@@ -281,25 +282,31 @@ function countInFolder(folderId) {
   return n;
 }
 
+function countProgress(folderId, folderName, started) {
+  if (folderName === "收藏") return Math.max(0, captured.size - started);
+  if (folderId) return Math.max(0, countInFolder(folderId) - started);
+  return Math.max(0, captured.size - started);
+}
+
 async function waitForNewItems(prevCount, timeoutMs, folderName, folderId, started, max) {
   const t0 = Date.now();
   let last = captured.size;
   let lastChange = Date.now();
   while (Date.now() - t0 < timeoutMs && !refreshStop) {
-    const inFolder = folderId ? countInFolder(folderId) - started : captured.size - started;
+    const got = countProgress(folderId, folderName, started);
     send("cangxia:progress", {
       active: true,
-      current: Math.min(Math.max(0, inFolder), max),
+      current: Math.min(got, max),
       total: max,
-      message: `正在识别「${folderName}」 ${Math.max(0, inFolder)}/${max}，本页认完再翻`,
+      message: `正在识别「${folderName}」 ${got}/${max}，认完这一排再翻`,
     });
-    if (inFolder >= max) return true;
-    await sleep(250);
+    if (got >= max) return true;
+    await sleep(200);
     if (captured.size !== last) {
       last = captured.size;
       lastChange = Date.now();
     }
-    if (captured.size > prevCount && Date.now() - lastChange > 900) return true;
+    if (captured.size > prevCount && Date.now() - lastChange > 1100) return true;
   }
   return captured.size > prevCount;
 }
@@ -315,22 +322,23 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     return;
   }
 
-  await waitForNewItems(captured.size, 5000, folderName, folderId, started, max);
+  await waitForNewItems(captured.size, 6000, folderName, folderId, started, max);
+  if (countProgress(folderId, folderName, started) >= max) return;
 
   let idle = 0;
   while (win && !win.isDestroyed() && !refreshStop) {
     while (refreshPaused && !refreshStop) await sleep(400);
     if (refreshStop || !win || win.isDestroyed()) return;
-    const inFolder = folderId ? countInFolder(folderId) - started : captured.size - started;
+    const got = countProgress(folderId, folderName, started);
     send("cangxia:progress", {
       active: true,
-      current: Math.min(Math.max(0, inFolder), max),
+      current: Math.min(got, max),
       total: max,
-      message: `正在读取「${folderName}」 ${Math.max(0, inFolder)}/${max}（合计 ${captured.size}）`,
+      message: `正在读取「${folderName}」 ${got}/${max}`,
     });
-    if (inFolder >= max) return;
+    if (got >= max) return;
     const before = captured.size;
-    let scrolled = "page";
+    let scrolled = "row";
     try {
       scrolled = await win.webContents.executeJavaScript(SCROLL_FEED_SCRIPT);
     } catch {
@@ -338,11 +346,12 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     }
     send("cangxia:progress", {
       active: true,
-      current: Math.min(Math.max(0, inFolder), max),
+      current: Math.min(got, max),
       total: max,
-      message: `已翻下一页，等待识别「${folderName}」 ${Math.max(0, inFolder)}/${max}`,
+      message: `往下翻了一排，等待识别「${folderName}」 ${got}/${max}`,
     });
     const grew = await waitForNewItems(before, 5000, folderName, folderId, started, max);
+    if (countProgress(folderId, folderName, started) >= max) return;
     if (grew) idle = 0;
     else idle += 1;
     if (scrolled === "end" && !grew) return;

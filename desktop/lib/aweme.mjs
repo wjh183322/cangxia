@@ -143,7 +143,7 @@ export function unwrapAweme(raw) {
 export function collectAwemes(payload) {
   if (!payload || typeof payload !== "object") return [];
   const data = payload.data || payload;
-  const lists = [data.aweme_list, data.list, data.items, payload.aweme_list];
+  const lists = [data.aweme_list, data.list, data.items, data.item_list, payload.aweme_list, payload.item_list];
   for (const list of lists) {
     if (!Array.isArray(list) || !list.length) continue;
     const awemes = list.map(unwrapAweme).filter(Boolean);
@@ -156,6 +156,12 @@ export function mapFolder(raw, index) {
   const id = String(raw.collects_id || raw.collection_id || raw.id || `folder_${index}`);
   const name = raw.collects_name || raw.name || raw.title || (index === 0 ? "收藏" : `收藏夹${index}`);
   return { id, name, isDefault: Boolean(raw.is_default) || name === "收藏" };
+}
+
+export function isCollectFeedUrl(url) {
+  const u = String(url || "");
+  if (/collects\/list|collection\/list/i.test(u)) return false;
+  return /listcollection|collects\/video|collects\/aweme|\/aweme\/v1\/web\/collect|favorite\/(list|item)|\/web\/collects\//i.test(u);
 }
 
 export function mergeWorks(existing, incoming) {
