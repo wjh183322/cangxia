@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { commonQuery, dyApiScript, parseCollectsList, nextCursor } from "./page-api.mjs";
+import { commonQuery, parseCollectsList, nextCursor, signUrlScript } from "./page-api.mjs";
 
 test("parseCollectsList reads collects_id and name", () => {
   const list = parseCollectsList({
@@ -14,14 +14,10 @@ test("parseCollectsList reads collects_id and name", () => {
   assert.equal(list[1].id, "222");
 });
 
-test("dyApiScript embeds collects_id", () => {
-  const src = dyApiScript({
-    method: "GET",
-    path: "/aweme/v1/web/collects/video/list/",
-    query: commonQuery({ collects_id: "111", cursor: "0", count: "10" }),
-  });
-  assert.match(src, /collects_id/);
-  assert.match(src, /XMLHttpRequest/);
+test("signUrlScript embeds collects path", () => {
+  const src = signUrlScript("GET", "https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=111");
+  assert.match(src, /collects_id=111/);
+  assert.match(src, /bdmsInvokeList/);
 });
 
 test("nextCursor reads has_more", () => {

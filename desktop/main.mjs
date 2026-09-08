@@ -7,7 +7,7 @@ import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
 import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
-import { commonQuery, dyApiScript, parseCollectsList, nextCursor } from "./lib/page-api.mjs";
+import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -493,19 +493,56 @@ async function sessionMsToken() {
   }
 }
 
-async function pageApi(win, opts, timeoutMs = 20000) {
+function sessionRequest(method, url, body = null) {
+  return new Promise((resolve) => {
+    const req = net.request({
+      method,
+      url,
+      session: session.fromPartition(PARTITION),
+      useSessionCookies: true,
+    });
+    req.setHeader("User-Agent", CHROME_UA);
+    req.setHeader("Referer", "https://www.douyin.com/user/self");
+    req.setHeader("Origin", "https://www.douyin.com");
+    req.setHeader("Accept", "application/json, text/plain, */*");
+    if (method === "POST") {
+      req.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+    }
+    let data = "";
+    req.on("response", (res) => {
+      res.on("data", (chunk) => {
+        data += chunk.toString();
+      });
+      res.on("end", () => {
+        let json = null;
+        try {
+          json = JSON.parse(data);
+        } catch {
+          json = null;
+        }
+        resolve({ status: res.statusCode, json, text: data.slice(0, 220) });
+      });
+    });
+    req.on("error", (err) => resolve({ status: 0, json: null, text: String(err?.message || err) }));
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function signedRequest(win, { method = "GET", path, query = {}, body = null }) {
   const msToken = await sessionMsToken();
-  const query = commonQuery({ ...(opts.query || {}), ...(msToken ? { msToken } : {}) });
-  const script = dyApiScript({ ...opts, query });
+  const qs = new URLSearchParams(commonQuery({ ...query, ...(msToken ? { msToken } : {}) })).toString();
+  const unsigned = `${path}?${qs}`;
+  let aBogus = "";
   try {
-    const result = await Promise.race([
-      win.webContents.executeJavaScript(script, true),
-      sleep(timeoutMs).then(() => ({ status: 0, json: null, text: "timeout" })),
-    ]);
-    return result || { status: 0, json: null, text: "empty" };
-  } catch (err) {
-    return { status: 0, json: null, text: String(err?.message || err) };
+    aBogus = await win.webContents.executeJavaScript(signUrlScript(method, unsigned));
+  } catch {
+    aBogus = "";
   }
+  const url = aBogus ? `${unsigned}&a_bogus=${encodeURIComponent(aBogus)}` : unsigned;
+  const res = await sessionRequest(method, url, body);
+  res.signed = Boolean(aBogus);
+  return res;
 }
 
 function jsonOk(json) {
@@ -518,6 +555,18 @@ function jsonOk(json) {
 async function harvestByApi(win, { folderId, folderName, max, started }) {
   readingInside = true;
   refreshReading = true;
+  try {
+    const ready = await win.webContents.executeJavaScript(waitBdmsScript());
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: max,
+      message: ready?.bdms ? "已接上抖音签名，开始读接口" : "签名脚本未就绪，仍尝试读接口",
+    });
+  } catch {
+    /* continue */
+  }
+
   if (folderName === "收藏") {
     let cursor = 0;
     for (let page = 0; page < 80; page += 1) {
@@ -530,20 +579,28 @@ async function harvestByApi(win, { folderId, folderName, max, started }) {
         message: `接口读取「收藏」 ${countProgress(folderId, folderName, started)}/${max}`,
       });
       const body = `cursor=${cursor}&count=10`;
-      let res = await pageApi(win, {
+      let res = await signedRequest(win, {
         method: "POST",
         path: "https://www.douyin.com/aweme/v1/web/aweme/listcollection/",
         query: { count: "10", cursor: String(cursor) },
         body,
       });
       if (!jsonOk(res.json) || !collectAwemes(res.json).length) {
-        res = await pageApi(win, {
+        res = await signedRequest(win, {
           method: "GET",
           path: "https://www.douyin.com/aweme/v1/web/aweme/listcollection/",
           query: { count: "10", cursor: String(cursor) },
         });
       }
-      if (!jsonOk(res.json)) break;
+      if (!jsonOk(res.json)) {
+        send("cangxia:progress", {
+          active: true,
+          current: countProgress(folderId, folderName, started),
+          total: max,
+          message: `收藏接口失败 ${res.status} ${res.json?.status_msg || res.text || ""}`.slice(0, 80),
+        });
+        break;
+      }
       ingestPayload("https://www.douyin.com/aweme/v1/web/aweme/listcollection/", res.json);
       const next = nextCursor(res.json, cursor);
       if (!next.hasMore) break;
@@ -560,7 +617,7 @@ async function harvestByApi(win, { folderId, folderName, max, started }) {
     total: max,
     message: `接口列出收藏夹，定位「${folderName}」`,
   });
-  const listRes = await pageApi(win, {
+  const listRes = await signedRequest(win, {
     method: "GET",
     path: "https://www.douyin.com/aweme/v1/web/collects/list/",
     query: { cursor: "0", count: "40" },
@@ -570,7 +627,16 @@ async function harvestByApi(win, { folderId, folderName, max, started }) {
   for (const item of parsed) ensureFolder(item.name, item.id);
   const hit = parsed.find((x) => x.name === folderName) || parsed.find((x) => x.name.includes(folderName));
   const id = String(hit?.id || folderIdByName(folderName) || "");
-  if (!id) return 0;
+  if (!id) {
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: max,
+      message: `没拿到「${folderName}」的 id（${listRes.status} ${listRes.json?.status_msg || (listRes.signed ? "已签名" : "未签名")}）`.slice(0, 90),
+    });
+    await sleep(1800);
+    return 0;
+  }
   readingCollectsId = id;
   let cursor = 0;
   for (let page = 0; page < 80; page += 1) {
@@ -583,12 +649,20 @@ async function harvestByApi(win, { folderId, folderName, max, started }) {
       message: `接口读取「${folderName}」 ${countProgress(folderId, folderName, started)}/${max}`,
     });
     const url = `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`;
-    const res = await pageApi(win, {
+    const res = await signedRequest(win, {
       method: "GET",
       path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
       query: { collects_id: id, cursor: String(cursor), count: "10" },
     });
-    if (!jsonOk(res.json)) break;
+    if (!jsonOk(res.json)) {
+      send("cangxia:progress", {
+        active: true,
+        current: countProgress(folderId, folderName, started),
+        total: max,
+        message: `夹接口失败 ${res.status} ${res.json?.status_msg || res.text || ""}`.slice(0, 80),
+      });
+      break;
+    }
     ingestPayload(url, res.json);
     const next = nextCursor(res.json, cursor);
     if (!next.hasMore) break;
@@ -658,70 +732,25 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   readingHasMore = true;
   seenThisRead = new Set();
   readingCollectsId = "";
-  readingInside = false;
+  readingInside = true;
   feedBuffer = [];
+  refreshReading = true;
   try {
     await openFavoriteFresh(win);
-    refreshReading = true;
-    readingInside = true;
-    const viaApi = await harvestByApi(win, { folderId, folderName, max, started });
-    if (viaApi > 0) return;
-    if (folderName === "收藏") {
-      await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-    } else {
-      send("cangxia:progress", {
-        active: true,
-        current: 0,
-        total: max,
-        message: `接口没读到「${folderName}」，改点进该夹`,
-      });
-      readingCollectsId = folderIdByName(folderName);
-      const how = await openNamedFolder(win, folderName);
-      if (how === "none") {
-        send("cangxia:progress", {
-          active: true,
-          current: 0,
-          total: max,
-          message: `没点进「${folderName}」，已停止`,
-        });
-        return;
-      }
-      readingInside = true;
-      replayFolderBuffer();
-    }
-  } catch {
-    return;
-  }
-
-  await waitForNewItems(captured.size, 7000, folderName, folderId, started, max);
-  if (countProgress(folderId, folderName, started) >= max) return;
-
-  let idle = 0;
-  while (win && !win.isDestroyed() && !refreshStop) {
-    while (refreshPaused && !refreshStop) await sleep(400);
-    if (refreshStop || !win || win.isDestroyed()) return;
-    const got = countProgress(folderId, folderName, started);
+    const got = await harvestByApi(win, { folderId, folderName, max, started });
     send("cangxia:progress", {
       active: true,
       current: Math.min(got, max),
       total: max,
-      message: `正在读取「${folderName}」 ${got}/${max}`,
+      message: got > 0 ? `接口读完「${folderName}」 ${got}/${max}` : `接口没有读到「${folderName}」`,
     });
-    if (got >= max) return;
-    if (!readingHasMore && got > 0) return;
-    const before = captured.size;
-    await wheelBurst(win);
+  } catch (err) {
     send("cangxia:progress", {
       active: true,
-      current: Math.min(got, max),
+      current: 0,
       total: max,
-      message: `滚轮翻页，等待「${folderName}」 ${got}/${max}`,
+      message: `接口读取出错：${String(err?.message || err)}`.slice(0, 80),
     });
-    const grew = await waitForNewItems(before, 4000, folderName, folderId, started, max);
-    if (countProgress(folderId, folderName, started) >= max) return;
-    if (grew) idle = 0;
-    else idle += 1;
-    if (idle >= 4) return;
   }
 }
 

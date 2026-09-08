@@ -30,26 +30,38 @@ export function commonQuery(extra = {}) {
   };
 }
 
-export function dyApiScript({ method = "GET", path, query = {}, body = null }) {
+export function waitBdmsScript() {
   return `(() => new Promise((resolve) => {
-    const qs = new URLSearchParams(${JSON.stringify(query)});
-    const url = ${JSON.stringify(path)} + "?" + qs.toString();
-    const xhr = new XMLHttpRequest();
-    xhr.open(${JSON.stringify(method)}, url, true);
-    xhr.withCredentials = true;
-    xhr.setRequestHeader("Accept", "application/json, text/plain, */*");
-    ${method === "POST" ? 'xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");' : ""}
-    const done = (status, text) => {
-      let json = null;
-      try { json = JSON.parse(text); } catch {}
-      resolve({ status, json, text: String(text || "").slice(0, 240) });
+    const t0 = Date.now();
+    const tick = () => {
+      if (window.bdms || Date.now() - t0 > 12000) {
+        resolve({ bdms: Boolean(window.bdms), ms: Date.now() - t0 });
+        return;
+      }
+      setTimeout(tick, 250);
     };
-    xhr.onload = () => done(xhr.status, xhr.responseText);
-    xhr.onerror = () => done(0, "error");
-    xhr.ontimeout = () => done(0, "timeout");
-    xhr.timeout = 18000;
-    xhr.send(${body == null ? "null" : JSON.stringify(String(body))});
+    tick();
   }))()`;
+}
+
+export function signUrlScript(method, url) {
+  return `(() => {
+    const full = ${JSON.stringify(url)};
+    window.a_bogus = "";
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.bdmsInvokeList = [
+        { args: [${JSON.stringify(method)}, full, true], func: function () {} },
+        { args: ["Accept", "application/json, text/plain, */*"], func: function () {} },
+      ];
+      xhr.invokeList = [
+        { name: "addEventListener", args: ["load", null] },
+        { name: "addEventListener", args: ["error", null] },
+      ];
+      xhr.send(null);
+    } catch (e) {}
+    return window.a_bogus || "";
+  })()`;
 }
 
 export function parseCollectsList(json) {
