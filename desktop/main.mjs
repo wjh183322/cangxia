@@ -309,21 +309,17 @@ function ingestPayload(url, json) {
   const collectsMatch = String(url).match(/collects_id=(\d+)/);
   const feedId = String(collectsMatch?.[1] || root?.collects_id || "");
   const named = (readingFolderName || "收藏") !== "收藏";
-  if (named) {
-    if (!readingCollectsId) {
-      if (isFolderFeed && feedId) {
+  if (named && isFolderFeed) {
+    if (!readingInside) {
+      if (feedId) {
         feedBuffer.push({ url, json, feedId, at: Date.now() });
         if (feedBuffer.length > 24) feedBuffer.shift();
       }
       return;
     }
-    if (feedId && feedId !== readingCollectsId) return;
+    if (!readingCollectsId && feedId) readingCollectsId = feedId;
+    if (readingCollectsId && feedId && feedId !== readingCollectsId) return;
     if (!feedId) return;
-  }
-  if (isFolderFeed && !readingInside) {
-    feedBuffer.push({ url, json, feedId, at: Date.now() });
-    if (feedBuffer.length > 24) feedBuffer.shift();
-    return;
   }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
@@ -373,6 +369,10 @@ function replayFolderBuffer() {
   feedBuffer = [];
   let pick = [];
   if (readingCollectsId) pick = recent.filter((x) => x.feedId === readingCollectsId);
+  else if (recent.length) {
+    pick = recent.slice(-1);
+    if (pick[0]?.feedId) readingCollectsId = pick[0].feedId;
+  }
   readingInside = true;
   for (const item of pick) ingestPayload(item.url, item.json);
 }
@@ -658,20 +658,32 @@ async function waitPageReady(win) {
 
 async function harvestMcp(win, ctx) {
   if (ctx.folderName !== "收藏") {
-    const known = readingCollectsId || folderIdByName(ctx.folderName);
     send("cangxia:progress", {
       active: true,
       current: 0,
       total: ctx.max || 1,
-      message: `${ctx.label || "5/5"} 打开收藏夹列表再点进「${ctx.folderName}」`,
+      message: `${ctx.label || "拦包"} 打开收藏夹列表，再点进「${ctx.folderName}」`,
     });
-    try {
-      await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
-    } catch {
-      /* ignore */
+    let tab = "none";
+    for (let i = 0; i < 4; i += 1) {
+      try {
+        tab = await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+      } catch {
+        tab = "none";
+      }
+      if (tab === "clicked") break;
+      await sleep(700);
     }
-    await sleep(2200);
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: ctx.max || 1,
+      message: tab === "clicked" ? "已打开收藏夹列表，正在点进目标夹" : "没找到「收藏夹」按钮，仍尝试点卡片",
+    });
+    await sleep(tab === "clicked" ? 3200 : 1200);
+    readingCollectsId = "";
     readingInside = false;
+    feedBuffer = [];
     const how = await openNamedFolder(win, ctx.folderName, { skipNav: true });
     if (how === "none") {
       noteHarvest("没点进夹");
@@ -679,30 +691,22 @@ async function harvestMcp(win, ctx) {
         active: true,
         current: 0,
         total: ctx.max || 1,
-        message: `${ctx.label || "5/5"} 没点进「${ctx.folderName}」`,
+        message: `${ctx.label || "拦包"} 没点进「${ctx.folderName}」`,
       });
       return 0;
     }
     readingInside = true;
     try {
       const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
-      if (pageId && (!known || String(pageId) === String(known))) readingCollectsId = String(pageId);
+      if (pageId) readingCollectsId = String(pageId);
     } catch {
       /* ignore */
     }
-    if (!readingCollectsId) readingCollectsId = known || "";
-    if (!readingCollectsId) {
-      send("cangxia:progress", {
-        active: true,
-        current: 0,
-        total: ctx.max || 1,
-        message: `${ctx.label || "5/5"} 点进了，但没有夹 id，放弃以免读错夹`,
-      });
-      return 0;
-    }
     replayFolderBuffer();
   }
-  return harvestByIntercept(win, ctx);
+  const got = await harvestByIntercept(win, ctx);
+  if (!got) noteHarvest(`拦包0条${readingCollectsId ? `#${readingCollectsId}` : ""}`);
+  return got;
 }
 
 function jsonOk(json) {
@@ -939,13 +943,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   lastHarvestMethod = "";
   lastHarvestCount = 0;
   const ctx = { folderId, folderName, max, started, label: "" };
-  const steps = [
-    ["1/5 页面fetch", () => harvestVia(win, ctx, nativeFetchRequest)],
-    ["2/5 页面XHR", () => harvestVia(win, ctx, hookedRequest)],
-    ["3/5 签名接口", () => harvestVia(win, ctx, signedRequest)],
-    ["4/5 cookie接口", () => harvestVia(win, ctx, netCookieRequest)],
-    ["5/5 程序进夹拦包", () => harvestMcp(win, ctx)],
-  ];
+  const steps = [["拦页面", () => harvestMcp(win, ctx)]];
   const tried = [];
   const addedSince = (before) => {
     let n = 0;
