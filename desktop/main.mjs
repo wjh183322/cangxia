@@ -853,10 +853,11 @@ async function harvestMcp(win, ctx) {
     } catch {
       /* ignore */
     }
-    replayFolderBuffer();
-    await drainPageFeeds(win);
-  } else {
-    return harvestByIntercept(win, ctx);
+    feedBuffer = [];
+    const via = await harvestVia(win, { ...ctx, label: "夹接口" }, nativeFetchRequest);
+    if (via >= (ctx.max || 1)) return via;
+    const got = await harvestByIntercept(win, ctx);
+    return Math.max(via, got);
   }
   const got = await harvestByIntercept(win, ctx);
   if (!got) {
@@ -957,7 +958,7 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
   const parsed = parseCollectsList(listRes.json);
   for (const item of parsed) ensureFolder(item.name, item.id);
   const hit = parsed.find((x) => x.name === folderName);
-  const id = String(hit?.id || folderIdByName(folderName) || "");
+  const id = String(hit?.id || readingCollectsId || folderIdByName(folderName) || "");
   if (!id || id.startsWith("folder_")) {
     if (!lastHarvestError) noteHarvest(`没拿到「${folderName}」id`);
     send("cangxia:progress", {
@@ -985,7 +986,7 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
     const res = await doRequest(win, {
       method: "GET",
       path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
-      query: { collects_id: id, cursor: String(cursor), count: "10" },
+      query: { collects_id: id, cursor: String(cursor), count: String(Math.max(10, Number(max) || 10)) },
     });
     if (!jsonOk(res.json)) {
       noteHarvest(`${res.status} ${res.json?.status_code ?? ""} ${res.json?.status_msg || res.text || ""}`);
