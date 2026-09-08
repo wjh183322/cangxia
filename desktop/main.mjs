@@ -7,7 +7,7 @@ import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
 import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
-import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT } from "./lib/page-api.mjs";
+import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -500,13 +500,38 @@ async function wheelBurst(win) {
   }
 }
 
-async function sessionMsToken() {
+async function sessionCookie(name) {
   try {
     const list = await session.fromPartition(PARTITION).cookies.get({ domain: ".douyin.com" });
-    return list.find((c) => c.name === "msToken")?.value || "";
+    return list.find((c) => c.name === name)?.value || "";
   } catch {
     return "";
   }
+}
+
+async function sessionMsToken() {
+  return sessionCookie("msToken");
+}
+
+async function pageQuery(win, extra = {}) {
+  let tokens = {};
+  try {
+    tokens = (await win.webContents.executeJavaScript(PAGE_TOKENS_SCRIPT)) || {};
+  } catch {
+    tokens = {};
+  }
+  const uifid = tokens.uifid || (await sessionCookie("UIFID")) || (await sessionCookie("UIFID_TEMP"));
+  const msToken = tokens.msToken || (await sessionMsToken());
+  const webid = tokens.webid || "";
+  const fp = tokens.verifyFp || tokens.fp || "";
+  if (!uifid) noteHarvest("页面没有 uifid");
+  return commonQuery({
+    ...extra,
+    ...(msToken ? { msToken } : {}),
+    ...(uifid ? { uifid } : {}),
+    ...(webid ? { webid } : {}),
+    ...(fp ? { verifyFp: fp, fp } : {}),
+  });
 }
 
 function sessionRequest(method, url, body = null) {
@@ -546,8 +571,7 @@ function sessionRequest(method, url, body = null) {
 }
 
 async function signedRequest(win, { method = "GET", path, query = {}, body = null }) {
-  const msToken = await sessionMsToken();
-  const qs = new URLSearchParams(commonQuery({ ...query, ...(msToken ? { msToken } : {}) })).toString();
+  const qs = new URLSearchParams(await pageQuery(win, query)).toString();
   const unsigned = `${path}?${qs}`;
   let aBogus = "";
   try {
@@ -571,8 +595,7 @@ async function signedRequest(win, { method = "GET", path, query = {}, body = nul
 }
 
 async function hookedRequest(win, { method = "GET", path, query = {}, body = null }) {
-  const msToken = await sessionMsToken();
-  const qs = new URLSearchParams(commonQuery({ ...query, ...(msToken ? { msToken } : {}) })).toString();
+  const qs = new URLSearchParams(await pageQuery(win, query)).toString();
   const pathOnly = String(path).replace(/^https?:\/\/www\.douyin\.com/, "");
   const url = `${pathOnly}?${qs}`;
   try {
@@ -583,14 +606,12 @@ async function hookedRequest(win, { method = "GET", path, query = {}, body = nul
 }
 
 async function netCookieRequest(win, { method = "GET", path, query = {}, body = null }) {
-  const msToken = await sessionMsToken();
-  const qs = new URLSearchParams(commonQuery({ ...query, ...(msToken ? { msToken } : {}) })).toString();
+  const qs = new URLSearchParams(await pageQuery(win, query)).toString();
   return sessionRequest(method, `${path}?${qs}`, body);
 }
 
 async function nativeFetchRequest(win, { method = "GET", path, query = {}, body = null }) {
-  const msToken = await sessionMsToken();
-  const qs = new URLSearchParams(commonQuery({ ...query, ...(msToken ? { msToken } : {}) })).toString();
+  const qs = new URLSearchParams(await pageQuery(win, query)).toString();
   const pathOnly = String(path).replace(/^https?:\/\/www\.douyin\.com/, "");
   const url = `${pathOnly}?${qs}`;
   try {
@@ -642,8 +663,14 @@ async function harvestMcp(win, ctx) {
       active: true,
       current: 0,
       total: ctx.max || 1,
-      message: `${ctx.label || "5/5"} 点进「${ctx.folderName}」${known ? `#${known}` : ""}`,
+      message: `${ctx.label || "5/5"} 打开收藏夹列表再点进「${ctx.folderName}」`,
     });
+    try {
+      await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+    } catch {
+      /* ignore */
+    }
+    await sleep(2200);
     readingInside = false;
     const how = await openNamedFolder(win, ctx.folderName, { skipNav: true });
     if (how === "none") {

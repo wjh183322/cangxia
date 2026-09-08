@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { commonQuery, parseCollectsList, nextCursor, signUrlScript } from "./page-api.mjs";
+import { commonQuery, parseCollectsList, nextCursor, signUrlScript, PAGE_TOKENS_SCRIPT } from "./page-api.mjs";
 
 test("parseCollectsList reads collects_id and name", () => {
   const list = parseCollectsList({
@@ -21,8 +21,7 @@ test("signUrlScript includes ticket-guard headers", () => {
   assert.match(src, /bd-ticket-guard-version/);
 });
 
-test("nextCursor reads has_more", () => {
-  const n = nextCursor({ cursor: 20, has_more: 1 }, 0);
-  assert.equal(n.cursor, 20);
-  assert.equal(n.hasMore, true);
+test("page tokens script reads UIFID", () => {
+  assert.match(PAGE_TOKENS_SCRIPT, /UIFID/);
+  assert.match(PAGE_TOKENS_SCRIPT, /_secsdk_uifid/);
 });

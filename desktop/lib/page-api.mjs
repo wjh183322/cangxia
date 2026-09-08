@@ -30,6 +30,28 @@ export function commonQuery(extra = {}) {
   };
 }
 
+export const PAGE_TOKENS_SCRIPT = `(() => {
+  const cookie = document.cookie || "";
+  const pick = (n) => {
+    const hit = cookie.split(";").map((x) => x.trim()).find((x) => x.startsWith(n + "="));
+    return hit ? decodeURIComponent(hit.slice(n.length + 1)) : "";
+  };
+  let webid = pick("s_v_web_id");
+  try {
+    const raw = localStorage.getItem("webId") || "";
+    if (raw && !webid) webid = String(JSON.parse(raw) || raw);
+  } catch {}
+  const fp = pick("s_v_web_id");
+  const uifid = String(window._secsdk_uifid || pick("UIFID") || pick("UIFID_TEMP") || "");
+  return {
+    uifid,
+    webid: String(webid || ""),
+    verifyFp: fp,
+    fp,
+    msToken: pick("msToken"),
+  };
+})()`;
+
 export function waitBdmsScript() {
   return `(() => new Promise((resolve) => {
     const t0 = Date.now();
