@@ -247,6 +247,24 @@ function defaultFolder() {
   return folders.find((f) => f.isDefault) || folders[0] || { id: "default", name: "收藏", isDefault: true };
 }
 
+function folderIdByName(name) {
+  const f = folders.find((x) => x.name === name && !x.isDefault);
+  if (!f) return "";
+  const id = String(f.id || "");
+  if (!id || id.startsWith("folder_")) return "";
+  return id;
+}
+
+async function waitFolderId(name, timeoutMs = 6000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs && !refreshStop) {
+    const id = folderIdByName(name);
+    if (id) return id;
+    await sleep(200);
+  }
+  return folderIdByName(name);
+}
+
 function ensureFolder(name, id) {
   if (!name || name === "收藏") return defaultFolder();
   const sid = id ? String(id) : "";
@@ -279,12 +297,13 @@ function ingestPayload(url, json) {
   const isList = /listcollection/i.test(url);
   const isFolderFeed = /collects\/video\/list/i.test(url);
   if (readingPattern === "listcollection" ? !isList : !isFolderFeed) return;
-  const collectsMatch = String(url).match(/collects_id=(\d+)/);
-  if (isFolderFeed && collectsMatch) {
-    if (!readingCollectsId) readingCollectsId = collectsMatch[1];
-    else if (collectsMatch[1] !== readingCollectsId) return;
-  }
   const root = json.data || json;
+  const collectsMatch = String(url).match(/collects_id=(\d+)/);
+  const feedId = String(collectsMatch?.[1] || root?.collects_id || "");
+  if (isFolderFeed) {
+    if (!readingCollectsId) return;
+    if (feedId && feedId !== readingCollectsId) return;
+  }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
   }
@@ -302,8 +321,12 @@ function ingestPayload(url, json) {
     const custom = folders.find((f) => f.id === String(aweme.collects_id || inner.collects_id || "") && !f.isDefault);
     const folder =
       reading !== "收藏"
-        ? ensureFolder(reading, aweme.collects_id || custom?.id)
+        ? ensureFolder(reading, readingCollectsId || custom?.id)
         : custom || defaultFolder();
+    if (reading !== "收藏" && readingCollectsId) {
+      const aid = String(inner.collects_id || feedId || "");
+      if (aid && aid !== readingCollectsId) continue;
+    }
     const work = mapAweme(aweme, folder);
     if (!work.id) continue;
     if (folder && !folder.isDefault) {
@@ -444,7 +467,15 @@ async function openNamedFolder(win, folderName) {
   await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
   await sleep(2500);
   await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
-  await sleep(3500);
+  await sleep(2500);
+  readingCollectsId = (await waitFolderId(folderName)) || readingCollectsId;
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: 1,
+    message: readingCollectsId ? `已对准「${folderName}」，正在点进` : `正在点进「${folderName}」`,
+  });
+  await sleep(1000);
   for (let attempt = 0; attempt < 5; attempt += 1) {
     if (refreshStop || !win || win.isDestroyed()) return "none";
     let inside = { ok: false };
@@ -489,6 +520,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     await openFavoriteFresh(win);
     if (folderName && folderName !== "收藏") {
       refreshReading = true;
+      readingCollectsId = folderIdByName(folderName);
       const how = await openNamedFolder(win, folderName);
       if (how === "none") {
         send("cangxia:progress", {
