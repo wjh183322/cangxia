@@ -39,6 +39,8 @@ let readingFolderId = "default";
 let readingPattern = "listcollection";
 let readingHasMore = true;
 let readingOrder = 0;
+let readingOrderStart = 0;
+let harvestIdOrder = [];
 let seenThisRead = new Set();
 let readingCollectsId = "";
 let readingInside = false;
@@ -385,9 +387,10 @@ function ingestPayload(url, json) {
       work.alsoInFolderIds = [...new Set([...(work.alsoInFolderIds || []), "default"])];
     }
     const prev = captured.get(work.id);
-    if (reading === "收藏") work.allIndex = readingOrder;
-    else work.listIndex = readingOrder;
-    readingOrder += 1;
+    if (id && !harvestIdOrder.includes(id)) harvestIdOrder.push(id);
+    const pos = id ? harvestIdOrder.indexOf(id) : harvestIdOrder.length;
+    if (reading === "收藏") work.allIndex = readingOrderStart + Math.max(0, pos);
+    else work.listIndex = readingOrderStart + Math.max(0, pos);
     if (prev) {
       if (work.allIndex == null && prev.allIndex != null) work.allIndex = prev.allIndex;
       if (work.listIndex == null && prev.listIndex != null) work.listIndex = prev.listIndex;
@@ -853,11 +856,21 @@ async function harvestMcp(win, ctx) {
     } catch {
       /* ignore */
     }
-    feedBuffer = [];
-    const via = await harvestVia(win, { ...ctx, label: "夹接口" }, nativeFetchRequest);
-    if (via >= (ctx.max || 1)) return via;
+    replayFolderBuffer();
+    await drainPageFeeds(win);
     const got = await harvestByIntercept(win, ctx);
-    return Math.max(via, got);
+    if (!got) {
+      let res = [];
+      try {
+        res = await win.webContents.executeJavaScript(LIST_COLLECT_URLS_SCRIPT);
+      } catch {
+        res = [];
+      }
+      const collectish = netTrace.filter((t) => /collect|listcollection|favorite/i.test(t));
+      const used = (collectish.length ? collectish : netTrace).slice(-3);
+      noteHarvest(`拦包0条 ${(used.join("|") || "无net")}`.slice(0, 90));
+    }
+    return got;
   }
   const got = await harvestByIntercept(win, ctx);
   if (!got) {
@@ -1113,6 +1126,7 @@ async function openNamedFolder(win, folderName, { skipNav = false } = {}) {
 }
 
 async function scrollUntilCap(win, { folderId, folderName, max, started }) {
+  harvestIdOrder = [];
   readingHasMore = true;
   seenThisRead = new Set();
   readingCollectsId = folderName === "收藏" ? "" : folderIdByName(folderName);
@@ -1583,6 +1597,8 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
         folderName === "收藏"
           ? Math.max(0, Number(opts.startAllIndex) || 0)
           : Math.max(0, Number(opts.startListIndex) || 0);
+      readingOrderStart = readingOrder;
+      harvestIdOrder = [];
       refreshReading = true;
       await sleep(1200);
       await scrollUntilCap(win, {
