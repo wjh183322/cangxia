@@ -112,7 +112,7 @@ export function AppShell() {
         <div className="flex items-center justify-between gap-3 border-b border-line bg-surface px-4 py-2 text-sm">
           <span>
             {lastRead.count > 0
-              ? `刚才用 ${lastRead.method} 读到「${lastRead.folder || "收藏"}」${lastRead.count} 条`
+              ? `${lastRead.method}（「${lastRead.folder || "收藏"}」）`
               : lastRead.method}
           </span>
           <button type="button" className="shrink-0 text-muted hover:text-fg" onClick={() => dismissLastRead()} aria-label="关闭">

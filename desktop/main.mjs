@@ -611,20 +611,10 @@ function jsonOk(json) {
   return true;
 }
 
-async function harvestVia(win, { folderId, folderName, max, started }, doRequest) {
+async function harvestVia(win, { folderId, folderName, max, started, label }, doRequest) {
   readingInside = true;
   refreshReading = true;
-  try {
-    const ready = await win.webContents.executeJavaScript(waitBdmsScript());
-    send("cangxia:progress", {
-      active: true,
-      current: 0,
-      total: max,
-      message: ready?.bdms ? "已接上抖音签名，开始读接口" : "签名脚本未就绪，仍尝试读接口",
-    });
-  } catch {
-    /* continue */
-  }
+  const tag = label || "接口";
 
   if (folderName === "收藏") {
     let cursor = 0;
@@ -635,7 +625,7 @@ async function harvestVia(win, { folderId, folderName, max, started }, doRequest
         active: true,
         current: Math.min(countProgress(folderId, folderName, started), max),
         total: max,
-        message: `接口读取「收藏」 ${countProgress(folderId, folderName, started)}/${max}`,
+        message: `${tag} 读「收藏」 ${countProgress(folderId, folderName, started)}/${max}`,
       });
       const body = `cursor=${cursor}&count=10`;
       let res = await doRequest(win, {
@@ -656,7 +646,7 @@ async function harvestVia(win, { folderId, folderName, max, started }, doRequest
           active: true,
           current: countProgress(folderId, folderName, started),
           total: max,
-          message: `收藏接口失败 ${res.status} ${res.json?.status_msg || res.text || ""}`.slice(0, 80),
+          message: `${tag} 收藏接口失败 ${res.status} ${res.json?.status_msg || res.text || ""}`.slice(0, 80),
         });
         break;
       }
@@ -674,7 +664,7 @@ async function harvestVia(win, { folderId, folderName, max, started }, doRequest
     active: true,
     current: 0,
     total: max,
-    message: `接口列出收藏夹，定位「${folderName}」`,
+    message: `${tag} 列出收藏夹，定位「${folderName}」`,
   });
   const listRes = await doRequest(win, {
     method: "GET",
@@ -691,7 +681,7 @@ async function harvestVia(win, { folderId, folderName, max, started }, doRequest
       active: true,
       current: 0,
       total: max,
-      message: `没拿到「${folderName}」的 id（${listRes.status} ${listRes.json?.status_msg || (listRes.signed ? "已签名" : "未签名")}）`.slice(0, 90),
+      message: `${tag} 没拿到「${folderName}」的 id`.slice(0, 90),
     });
     await sleep(1800);
     return 0;
@@ -705,7 +695,7 @@ async function harvestVia(win, { folderId, folderName, max, started }, doRequest
       active: true,
       current: Math.min(countProgress(folderId, folderName, started), max),
       total: max,
-      message: `接口读取「${folderName}」 ${countProgress(folderId, folderName, started)}/${max}`,
+      message: `${tag} 读「${folderName}」 ${countProgress(folderId, folderName, started)}/${max}`,
     });
     const url = `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`;
     const res = await doRequest(win, {
@@ -718,7 +708,7 @@ async function harvestVia(win, { folderId, folderName, max, started }, doRequest
         active: true,
         current: countProgress(folderId, folderName, started),
         total: max,
-        message: `夹接口失败 ${res.status} ${res.json?.status_msg || res.text || ""}`.slice(0, 80),
+        message: `${tag} 夹接口失败 ${res.status} ${res.json?.status_msg || res.text || ""}`.slice(0, 80),
       });
       break;
     }
@@ -829,7 +819,9 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   readingInside = true;
   feedBuffer = [];
   refreshReading = true;
-  const ctx = { folderId, folderName, max, started };
+  lastHarvestMethod = "";
+  lastHarvestCount = 0;
+  const ctx = { folderId, folderName, max, started, label: "" };
   const steps = [
     ["1/5 f2 页面XHR", () => harvestVia(win, ctx, hookedRequest)],
     ["2/5 TikTokDownloader 签名", () => harvestVia(win, ctx, signedRequest)],
@@ -837,53 +829,77 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     ["4/5 LightJUNction 再试XHR", () => harvestVia(win, ctx, hookedRequest)],
     ["5/5 MCP 拦页面", () => harvestMcp(win, ctx)],
   ];
+  const tried = [];
+  const addedSince = (before) => {
+    let n = 0;
+    for (const id of captured.keys()) if (!before.has(id)) n += 1;
+    return n;
+  };
   try {
     await openFavoriteFresh(win);
+    try {
+      await win.webContents.executeJavaScript(waitBdmsScript());
+    } catch {
+      /* continue */
+    }
     for (let i = 0; i < steps.length; i += 1) {
       const [label, run] = steps[i];
-      if (refreshStop || !win || win.isDestroyed()) return;
+      if (refreshStop || !win || win.isDestroyed()) {
+        lastHarvestMethod = tried.length ? `${tried.join(" → ")}，中途停止` : "中途停止";
+        return;
+      }
+      ctx.label = label;
       send("cangxia:progress", {
         active: true,
         current: countProgress(folderId, folderName, started),
         total: max,
-        message: `正在用 ${label} 读「${folderName}」`,
+        message: tried.length
+          ? `${tried.join(" → ")} → 正在用 ${label} 读「${folderName}」`
+          : `正在用 ${label} 读「${folderName}」`,
       });
-      const got = await run();
-      if (got > 0) {
-        lastHarvestMethod = label;
-        lastHarvestCount = got;
+      const before = new Set(captured.keys());
+      await run();
+      const added = addedSince(before);
+      if (added > 0) {
+        tried.push(`${label} 读到${added}条`);
+        lastHarvestMethod = tried.join(" → ");
+        lastHarvestCount = added;
         send("cangxia:progress", {
           active: true,
-          current: Math.min(got, max),
+          current: Math.min(added, max),
           total: max,
-          message: `${label} 读到 ${got} 条`,
+          message: lastHarvestMethod,
         });
         return;
       }
+      tried.push(`${label} 没过`);
+      lastHarvestMethod = tried.join(" → ");
       const next = steps[i + 1];
       if (!next) break;
       send("cangxia:progress", {
         active: true,
         current: 0,
         total: max,
-        message: `${label} 没读到，改试 ${next[0]}`,
+        message: `${lastHarvestMethod} → 改试 ${next[0]}`,
       });
-      await sleep(1600);
+      await sleep(1400);
     }
-    lastHarvestMethod = `五种方法都没读到「${folderName}」`;
+    lastHarvestMethod = `${tried.join(" → ")}，五种都没读到`;
     lastHarvestCount = 0;
     send("cangxia:progress", {
       active: true,
       current: 0,
       total: max,
-      message: `五种方法都没读到「${folderName}」`,
+      message: lastHarvestMethod,
     });
   } catch (err) {
+    lastHarvestMethod = `${tried.join(" → ")}${tried.length ? " → " : ""}出错：${String(err?.message || err)}`.slice(0, 120);
+    lastHarvestCount = 0;
     send("cangxia:progress", {
       active: true,
       current: 0,
       total: max,
-      message: `读取出错：${String(err?.message || err)}`.slice(0, 80),
+      message: lastHarvestMethod,
     });
   }
 }
