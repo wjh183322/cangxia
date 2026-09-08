@@ -1,6 +1,7 @@
 import { RefreshCw, Settings, FolderClosed, X } from "lucide-react";
 import { CaptchaDialog } from "@/components/captcha-dialog";
 import { CollectView } from "@/components/collect-view";
+import { FolderDeleteDialog } from "@/components/folder-delete-dialog";
 import { FolderPickDialog } from "@/components/folder-pick-dialog";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DownloadCancelDialog } from "@/components/download-cancel-dialog";
