@@ -434,8 +434,15 @@ async function openNamedFolder(win, folderName) {
   await sleep(2500);
   await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
   await sleep(3500);
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     if (refreshStop || !win || win.isDestroyed()) return "none";
+    let inside = { ok: false };
+    try {
+      inside = await win.webContents.executeJavaScript(folderInsideScript(folderName));
+    } catch {
+      inside = { ok: false };
+    }
+    if (inside?.ok) return "in";
     let loc = { how: "none", x: 0, y: 0 };
     try {
       loc = await win.webContents.executeJavaScript(locateFolderCardScript(folderName));
@@ -450,22 +457,14 @@ async function openNamedFolder(win, folderName) {
         message: `正在点进「${folderName}」`,
       });
       mouseClick(win, loc.x, loc.y);
-      await sleep(400);
+      await sleep(500);
       try {
         await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
       } catch {
         /* ignore */
       }
     }
-    await sleep(1800);
-    let inside = { ok: false };
-    try {
-      inside = await win.webContents.executeJavaScript(folderInsideScript(folderName));
-    } catch {
-      inside = { ok: false };
-    }
-    if (inside?.ok) return loc.how || "in";
-    await sleep(900);
+    await sleep(1600);
   }
   return "none";
 }
@@ -478,6 +477,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   try {
     await openFavoriteFresh(win);
     if (folderName && folderName !== "收藏") {
+      refreshReading = false;
       const how = await openNamedFolder(win, folderName);
       if (how === "none") {
         send("cangxia:progress", {
@@ -488,7 +488,15 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
         });
         return;
       }
+      refreshReading = true;
+      send("cangxia:progress", {
+        active: true,
+        current: 0,
+        total: max,
+        message: `已进入「${folderName}」，开始读取 0/${max}`,
+      });
     } else {
+      refreshReading = true;
       await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
     }
   } catch {
@@ -615,7 +623,7 @@ async function watchAndRead(win, max) {
       const yes = await askReadFolder(state.name);
       if (refreshStop || !win || win.isDestroyed()) break;
       if (yes) {
-        refreshReading = true;
+        refreshReading = readingFolderName === "收藏";
         readingFolderName = state.name || "收藏";
         const folder = ensureFolder(readingFolderName);
         readingFolderId = folder.id;

@@ -274,13 +274,16 @@ export function locateFolderCardScript(name) {
 
 export function folderInsideScript(name) {
   return `(() => {
+    const want = ${JSON.stringify(name)};
     const textOf = (el) => (el.innerText || "").replace(/\\s+/g, "");
-    const vis = (el, maxTop) => {
+    const vis = (el) => {
       const r = el.getBoundingClientRect();
-      return r.width > 8 && r.height > 8 && r.top < maxTop;
+      return r.width > 8 && r.height > 8 && r.bottom > 0 && r.top < innerHeight;
     };
-    const hasBack = [...document.querySelectorAll("span, div, button, a")].some((el) => textOf(el) === "返回" && vis(el, 170));
-    const hasNew = [...document.querySelectorAll("span, div, button, a")].some((el) => textOf(el) === "新建收藏夹" && vis(el, 280));
+    const has = (label) =>
+      [...document.querySelectorAll("span, div, button, a, p")].some((el) => textOf(el) === label && vis(el));
+    const hasBack = has("返回");
+    const hasAdd = has("添加视频");
     const names = new Set();
     for (const el of document.querySelectorAll("div, a, section")) {
       const t = textOf(el);
@@ -289,7 +292,7 @@ export function folderInsideScript(name) {
       if (m && m[1] && !/收藏夹|视频|新建/.test(m[1])) names.add(m[1]);
     }
     const grid = names.size >= 3;
-    return { hasBack, hasNew, grid, ok: Boolean(hasBack || (hasNew && !grid)) };
+    return { hasBack, hasAdd, grid, ok: Boolean((hasBack || hasAdd) && !grid), want };
   })()`;
 }
 
