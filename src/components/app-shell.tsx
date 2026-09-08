@@ -1,6 +1,7 @@
-import { RefreshCw, Settings, FolderClosed } from "lucide-react";
+import { RefreshCw, Settings, FolderClosed, X } from "lucide-react";
 import { CaptchaDialog } from "@/components/captcha-dialog";
 import { CollectView } from "@/components/collect-view";
+import { FolderDeleteDialog } from "@/components/folder-delete-dialog";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DownloadCancelDialog } from "@/components/download-cancel-dialog";
 import { DownloadDrawer, DownloadMiniBar } from "@/components/download-drawer";
@@ -25,6 +26,7 @@ export function AppShell() {
   const setSettingsOpen = useApp((s) => s.setSettingsOpen);
   const logout = useApp((s) => s.logout);
   const openLoginGate = useApp((s) => s.openLoginGate);
+  const askDeleteFolder = useApp((s) => s.askDeleteFolder);
   const loggedIn = useApp((s) => s.loggedIn);
   const account = useApp((s) => s.account);
   const syncingBrowser = useApp((s) => s.syncingBrowser);
@@ -113,17 +115,33 @@ export function AppShell() {
               ).length;
               const active = folderId === folder.id;
               return (
-                <button
+                <div
                   key={folder.id}
-                  onClick={() => setFolder(folder.id)}
-                  className={`flex min-h-11 shrink-0 items-center gap-2 rounded-md px-3 text-left text-sm ${
+                  className={`flex min-h-11 shrink-0 items-center gap-1 rounded-md px-2 text-sm ${
                     active ? "bg-raised text-fg" : "text-muted hover:bg-raised/60"
                   }`}
                 >
-                  <FolderClosed className="size-4 shrink-0" />
-                  <span className="truncate">{folder.name}</span>
-                  <span className="ml-auto tabular-nums text-xs text-subtle">{count}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setFolder(folder.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2 px-1 py-2 text-left"
+                  >
+                    <FolderClosed className="size-4 shrink-0" />
+                    <span className="truncate">{folder.name}</span>
+                    <span className="ml-auto tabular-nums text-xs text-subtle">{count}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-sm text-subtle hover:bg-surface hover:text-fg"
+                    aria-label={`删除${folder.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      askDeleteFolder(folder.id);
+                    }}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
               );
             })}
           </aside>
@@ -135,6 +153,7 @@ export function AppShell() {
       <SettingsDialog />
       <Viewer />
       <DeleteConfirmDialog />
+      <FolderDeleteDialog />
       <DownloadCancelDialog />
       <DownloadDrawer />
     </div>

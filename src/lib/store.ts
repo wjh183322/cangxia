@@ -58,6 +58,8 @@ interface AppState {
   syncingBrowser: boolean;
   syncCount: { works: number; folders: number };
   hiddenCollectIds: string[];
+  deletedFolderIds: string[];
+  pendingFolderDeleteId: string | null;
   loginGate: boolean;
   pendingReadAfterLogin: boolean;
   login: () => Promise<void>;
@@ -108,6 +110,9 @@ interface AppState {
   startDownload: (ids: string[]) => void;
   hideFromCollect: (ids: string[]) => void;
   hideFolderFromCollect: (folderId: string) => void;
+  askDeleteFolder: (folderId: string) => void;
+  cancelDeleteFolder: () => void;
+  confirmDeleteFolder: () => void;
   resolveCaptcha: () => void;
   skipCaptchaBatch: () => void;
 }
@@ -193,6 +198,8 @@ export const useApp = create<AppState>()(
       syncingBrowser: false,
       syncCount: { works: 0, folders: 0 },
       hiddenCollectIds: [],
+      deletedFolderIds: [],
+      pendingFolderDeleteId: null,
       loginGate: false,
       pendingReadAfterLogin: false,
 
@@ -525,10 +532,19 @@ export const useApp = create<AppState>()(
       applyRefreshResult: (folders, works) => {
         const existing = liveDesktop() ? get().works.filter((w) => !isDemoWork(w)) : get().works;
         const seen = new Set(works.map((w) => w.id));
+        const seenFolders = new Set(works.flatMap((w) => [w.folderId, ...(w.alsoInFolderIds || [])]));
+        const deletedFolderIds = get().deletedFolderIds.filter((id) => !seenFolders.has(id));
+        let nextFolders = folders.length ? folders : get().folders;
+        nextFolders = nextFolders.filter((f) => !deletedFolderIds.includes(f.id));
+        if (!nextFolders.some((f) => f.isDefault)) nextFolders = [...emptyFolders(), ...nextFolders];
+        if (!nextFolders.length) nextFolders = emptyFolders();
+        const folderId = nextFolders.some((f) => f.id === get().folderId) ? get().folderId : nextFolders[0].id;
         set({
-          folders: folders.length ? folders : get().folders,
+          folders: nextFolders,
+          folderId,
           works: mergeIncoming(existing, works),
           hiddenCollectIds: get().hiddenCollectIds.filter((id) => !seen.has(id)),
+          deletedFolderIds,
           syncingBrowser: false,
           job: { active: false, current: 0, total: 0, message: "" },
         });
@@ -547,6 +563,34 @@ export const useApp = create<AppState>()(
           .works.filter((w) => inFolder(w, folderId))
           .map((w) => w.id);
         get().hideFromCollect(ids);
+      },
+      askDeleteFolder: (folderId) => set({ pendingFolderDeleteId: folderId }),
+      cancelDeleteFolder: () => set({ pendingFolderDeleteId: null }),
+      confirmDeleteFolder: () => {
+        const id = get().pendingFolderDeleteId;
+        if (!id) return;
+        const hideIds: string[] = [];
+        const works = get().works.map((w) => {
+          if (!inFolder(w, id)) return w;
+          const others = [w.folderId, ...(w.alsoInFolderIds || [])].filter((x) => x !== id);
+          if (!others.length) {
+            hideIds.push(w.id);
+            return w;
+          }
+          return { ...w, folderId: others[0], alsoInFolderIds: others.slice(1) };
+        });
+        let folders = get().folders.filter((f) => f.id !== id);
+        if (!folders.length) folders = emptyFolders();
+        const folderId = get().folderId === id ? folders[0].id : get().folderId;
+        set({
+          works,
+          folders,
+          folderId,
+          hiddenCollectIds: [...new Set([...get().hiddenCollectIds, ...hideIds])],
+          deletedFolderIds: [...new Set([...get().deletedFolderIds, id])],
+          pendingFolderDeleteId: null,
+          selectedIds: get().selectedIds.filter((x) => !hideIds.includes(x)),
+        });
       },
 
       startDownload: (ids) => {
@@ -630,6 +674,7 @@ export const useApp = create<AppState>()(
         tab: s.tab,
         dlTasks: s.dlTasks,
         hiddenCollectIds: s.hiddenCollectIds,
+        deletedFolderIds: s.deletedFolderIds,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
@@ -645,6 +690,8 @@ export const useApp = create<AppState>()(
           state.dlTasks = hydrateTasks(cleaned.dlTasks || []);
         }
         state.hiddenCollectIds = state.hiddenCollectIds || [];
+        state.deletedFolderIds = state.deletedFolderIds || [];
+        state.pendingFolderDeleteId = null;
         state.loginGate = false;
         state.pendingReadAfterLogin = false;
       },
