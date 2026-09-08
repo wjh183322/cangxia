@@ -307,13 +307,22 @@ function ingestPayload(url, json) {
   const root = json.data || json;
   const collectsMatch = String(url).match(/collects_id=(\d+)/);
   const feedId = String(collectsMatch?.[1] || root?.collects_id || "");
+  const named = (readingFolderName || "收藏") !== "收藏";
+  if (named) {
+    if (!readingCollectsId) {
+      if (isFolderFeed && feedId) {
+        feedBuffer.push({ url, json, feedId, at: Date.now() });
+        if (feedBuffer.length > 24) feedBuffer.shift();
+      }
+      return;
+    }
+    if (feedId && feedId !== readingCollectsId) return;
+    if (!feedId) return;
+  }
   if (isFolderFeed && !readingInside) {
     feedBuffer.push({ url, json, feedId, at: Date.now() });
     if (feedBuffer.length > 24) feedBuffer.shift();
     return;
-  }
-  if (isFolderFeed && readingInside) {
-    if (!readingCollectsId && feedId) readingCollectsId = feedId;
   }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
@@ -332,7 +341,7 @@ function ingestPayload(url, json) {
     const custom = folders.find((f) => f.id === String(aweme.collects_id || inner.collects_id || "") && !f.isDefault);
     const folder =
       reading !== "收藏"
-        ? ensureFolder(reading, readingCollectsId || custom?.id)
+        ? ensureFolder(reading, readingCollectsId)
         : custom || defaultFolder();
     const work = mapAweme(aweme, folder);
     if (!work.id) continue;
@@ -361,15 +370,8 @@ function ingestPayload(url, json) {
 function replayFolderBuffer() {
   const recent = feedBuffer.filter((x) => Date.now() - x.at < 25000);
   feedBuffer = [];
-  let pick = recent;
-  if (readingCollectsId) {
-    const matched = recent.filter((x) => x.feedId === readingCollectsId);
-    if (matched.length) pick = matched;
-    else pick = recent.slice(-1);
-  } else if (recent.length) {
-    pick = recent.slice(-1);
-    if (pick[0]?.feedId) readingCollectsId = pick[0].feedId;
-  }
+  let pick = [];
+  if (readingCollectsId) pick = recent.filter((x) => x.feedId === readingCollectsId);
   readingInside = true;
   for (const item of pick) ingestPayload(item.url, item.json);
 }
@@ -608,15 +610,14 @@ async function goCollectContext(win, folderName) {
 
 async function harvestMcp(win, ctx) {
   if (ctx.folderName !== "收藏") {
+    const known = readingCollectsId || folderIdByName(ctx.folderName);
     send("cangxia:progress", {
       active: true,
       current: 0,
       total: ctx.max || 1,
-      message: `${ctx.label || "5/5"} 点进「${ctx.folderName}」，不要停在卡片墙`,
+      message: `${ctx.label || "5/5"} 点进「${ctx.folderName}」${known ? `#${known}` : ""}`,
     });
-    readingCollectsId = "";
     readingInside = false;
-    feedBuffer = [];
     const how = await openNamedFolder(win, ctx.folderName, { skipNav: true });
     if (how === "none") {
       send("cangxia:progress", {
@@ -630,9 +631,19 @@ async function harvestMcp(win, ctx) {
     readingInside = true;
     try {
       const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
-      if (pageId) readingCollectsId = String(pageId);
+      if (pageId && (!known || String(pageId) === String(known))) readingCollectsId = String(pageId);
     } catch {
       /* ignore */
+    }
+    if (!readingCollectsId) readingCollectsId = known || "";
+    if (!readingCollectsId) {
+      send("cangxia:progress", {
+        active: true,
+        current: 0,
+        total: ctx.max || 1,
+        message: `${ctx.label || "5/5"} 点进了，但没有夹 id，放弃以免读错夹`,
+      });
+      return 0;
     }
     replayFolderBuffer();
   }
@@ -647,9 +658,9 @@ function jsonOk(json) {
 }
 
 async function harvestVia(win, { folderId, folderName, max, started, label }, doRequest) {
-  readingInside = true;
   refreshReading = true;
   const tag = label || "接口";
+  if (folderName === "收藏") readingInside = true;
 
   if (folderName === "收藏") {
     let cursor = 0;
@@ -709,19 +720,20 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
   if (jsonOk(listRes.json)) ingestPayload("https://www.douyin.com/aweme/v1/web/collects/list/", listRes.json);
   const parsed = parseCollectsList(listRes.json);
   for (const item of parsed) ensureFolder(item.name, item.id);
-  const hit = parsed.find((x) => x.name === folderName) || parsed.find((x) => x.name.includes(folderName));
+  const hit = parsed.find((x) => x.name === folderName);
   const id = String(hit?.id || folderIdByName(folderName) || "");
-  if (!id) {
+  if (!id || id.startsWith("folder_")) {
     send("cangxia:progress", {
       active: true,
       current: 0,
       total: max,
       message: `${tag} 没拿到「${folderName}」的 id`.slice(0, 90),
     });
-    await sleep(1800);
+    await sleep(1200);
     return 0;
   }
   readingCollectsId = id;
+  readingInside = true;
   let cursor = 0;
   for (let page = 0; page < 80; page += 1) {
     if (refreshStop || !win || win.isDestroyed()) return countProgress(folderId, folderName, started);
@@ -730,7 +742,7 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
       active: true,
       current: Math.min(countProgress(folderId, folderName, started), max),
       total: max,
-      message: `${tag} 读「${folderName}」 ${countProgress(folderId, folderName, started)}/${max}`,
+      message: `${tag} 读「${folderName}」#${id} ${countProgress(folderId, folderName, started)}/${max}`,
     });
     const url = `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`;
     const res = await doRequest(win, {
@@ -850,8 +862,8 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   readingOrder = 0;
   readingHasMore = true;
   seenThisRead = new Set();
-  readingCollectsId = "";
-  readingInside = true;
+  readingCollectsId = folderName === "收藏" ? "" : folderIdByName(folderName);
+  readingInside = folderName === "收藏";
   feedBuffer = [];
   refreshReading = true;
   lastHarvestMethod = "";
@@ -867,7 +879,15 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   const tried = [];
   const addedSince = (before) => {
     let n = 0;
-    for (const id of captured.keys()) if (!before.has(id)) n += 1;
+    for (const [id, work] of captured) {
+      if (before.has(id)) continue;
+      if (folderName === "收藏") n += 1;
+      else if (work.folderId === folderId || work.folderId === readingCollectsId) n += 1;
+      else {
+        const f = folders.find((x) => x.name === folderName);
+        if (f && work.folderId === f.id) n += 1;
+      }
+    }
     return n;
   };
   try {
