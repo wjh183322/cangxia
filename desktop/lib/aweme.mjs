@@ -205,7 +205,7 @@ export function isCollectFeedUrl(url) {
 
 export function isFolderListUrl(url) {
   const u = String(url || "");
-  return /\/collects\/list\/?(?:\?|$)/i.test(u) && !/video\/list/i.test(u);
+  return /collects\/list/i.test(u) && !/video\/list|aweme\/list|item\/list/i.test(u);
 }
 
 export function mergeWorks(existing, incoming) {

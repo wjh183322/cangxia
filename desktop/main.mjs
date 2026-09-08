@@ -6,7 +6,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT } from "./lib/login-page.mjs";
 import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -744,24 +744,39 @@ async function harvestFolderNames(win) {
   const href = await currentHref(win);
   if (!/favorite_collection/i.test(href)) {
     await win.loadURL("https://www.douyin.com/user/self?showTab=favorite_collection", { userAgent: CHROME_UA });
-    await sleep(3500);
+    await sleep(3200);
   }
   try {
     await win.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT);
   } catch {
     /* ignore */
   }
+  try {
+    await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+  } catch {
+    /* ignore */
+  }
+  await sleep(2500);
   await drainPageFeeds(win);
-  await sleep(1600);
+  await sleep(1500);
   await drainPageFeeds(win);
+  let visible = [];
+  try {
+    visible = await win.webContents.executeJavaScript(LIST_VISIBLE_FOLDERS_SCRIPT);
+  } catch {
+    visible = [];
+  }
+  for (const name of visible || []) {
+    if (validFolderName(name)) ensureFolder(name);
+  }
   const names = folders.filter((f) => !f.isDefault).map((f) => f.name);
   send("cangxia:progress", {
     active: true,
     current: names.length,
     total: Math.max(1, names.length),
-    message: names.length ? `已识别收藏夹：${names.join("、")}` : "收藏夹名单还没出来，仍保留左侧已有夹",
+    message: names.length ? `已识别收藏夹：${names.join("、")}` : `页面夹名0个 ${visible?.length || 0}`,
   });
-  await sleep(800);
+  await sleep(900);
 }
 
 async function harvestMcp(win, ctx) {
