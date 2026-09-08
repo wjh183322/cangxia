@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { desktop } from "@/lib/desktop";
+import { applyDesktopDlEvent } from "@/lib/download-pump";
 import { useApp } from "@/lib/store";
 
 export function DesktopBridge() {
@@ -20,6 +21,7 @@ export function DesktopBridge() {
     });
     const offCaptcha = api.onCaptcha(() => {
       const s = useApp.getState();
+      s.pauseAllDl();
       useApp.setState({
         captchaOpen: true,
         captchaReason: s.syncingBrowser ? "refresh" : "download",
@@ -27,6 +29,7 @@ export function DesktopBridge() {
       });
       void api.notifyCaptcha();
     });
+    const offDl = api.onDl((ev) => applyDesktopDlEvent(ev as Parameters<typeof applyDesktopDlEvent>[0]));
     void api.setSettings(useApp.getState().settings);
     return () => {
       offProgress();
@@ -34,6 +37,7 @@ export function DesktopBridge() {
       offCount();
       offDone();
       offCaptcha();
+      offDl();
     };
   }, []);
   return null;

@@ -15,7 +15,6 @@ export function CollectView() {
   const rangeTo = useApp((s) => s.rangeTo);
   const setRange = useApp((s) => s.setRange);
   const startDownload = useApp((s) => s.startDownload);
-  const job = useApp((s) => s.job);
 
   const list = listWorks(works, folderId, kind);
 
@@ -52,14 +51,10 @@ export function CollectView() {
             inputMode="numeric"
           />
         </label>
-        <Button size="sm" variant="secondary" onClick={downloadRange} disabled={job.active}>
+        <Button size="sm" variant="secondary" onClick={downloadRange}>
           按序号下载
         </Button>
-        <Button
-          size="sm"
-          onClick={() => startDownload(selectedIds)}
-          disabled={job.active || selectedIds.length === 0}
-        >
+        <Button size="sm" onClick={() => startDownload(selectedIds)} disabled={selectedIds.length === 0}>
           下载选中（{selectedIds.length}）
         </Button>
       </div>

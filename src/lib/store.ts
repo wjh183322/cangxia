@@ -2,8 +2,20 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { DEMO_USER, FOLDERS, PENDING_REFRESH_WORK, WORKS } from "./demo-data";
 import { desktop } from "./desktop";
+import {
+  cancelNeedsConfirm,
+  enqueueTasks,
+  hydrateTasks,
+  pauseDownloading,
+  pauseTask,
+  resumePaused,
+  resumeTask,
+  taskFromWork,
+  type DlTask,
+} from "./download";
+import { abortDesktop, kickDownload } from "./download-pump";
 import type { AppTab, DownloadJob, Folder, KindFilter, Settings, Work } from "./types";
-import { matchesKind, videoStatusOf, workNeedsDownload, workVideos } from "./utils";
+import { applyDeletedWorks, matchesKind, videoStatusOf, workNeedsDownload } from "./utils";
 
 interface AppState {
   loggedIn: boolean;
@@ -31,6 +43,16 @@ interface AppState {
   browseArmed: boolean;
   browseWorkId: string | null;
   browseMediaIndex: number;
+  tidyArmed: boolean;
+  tidyIds: string[];
+  deleteIds: string[];
+  deleteError: string;
+  dlOpen: boolean;
+  dlTasks: DlTask[];
+  dlPauseAll: boolean;
+  dlSpeed: number;
+  dlCancelIds: string[];
+  dlExpandedId: string | null;
   toastWechat: boolean;
   account: { nickname: string; douyinId: string };
   syncingBrowser: boolean;
@@ -57,6 +79,24 @@ interface AppState {
   openBrowse: (id: string) => void;
   closeBrowse: () => void;
   setBrowseMediaIndex: (index: number) => void;
+  armTidy: () => void;
+  toggleTidy: (id: string) => void;
+  askDelete: (ids: string[]) => void;
+  cancelDelete: () => void;
+  confirmDelete: () => Promise<void>;
+  setDlOpen: (open: boolean) => void;
+  pauseDlTask: (id: string) => void;
+  resumeDlTask: (id: string) => void;
+  pauseAllDl: () => void;
+  resumeAllDl: () => void;
+  askCancelDl: (ids: string[]) => void;
+  cancelDlSoft: (ids: string[]) => void;
+  confirmCancelDl: () => Promise<void>;
+  cancelCancelDl: () => void;
+  retryDlTask: (id: string) => void;
+  clearDlDone: () => void;
+  setDlExpanded: (id: string | null) => void;
+  openWorkFolder: (workId: string) => void;
   refresh: () => Promise<void>;
   finishRefresh: () => Promise<void>;
   applyRefreshResult: (folders: Folder[], works: Work[]) => void;
@@ -110,6 +150,16 @@ export const useApp = create<AppState>()(
       browseArmed: false,
       browseWorkId: null,
       browseMediaIndex: 0,
+      tidyArmed: false,
+      tidyIds: [],
+      deleteIds: [],
+      deleteError: "",
+      dlOpen: false,
+      dlTasks: [],
+      dlPauseAll: false,
+      dlSpeed: 0,
+      dlCancelIds: [],
+      dlExpandedId: null,
       toastWechat: false,
       account: { nickname: "", douyinId: "" },
       syncingBrowser: false,
@@ -136,6 +186,12 @@ export const useApp = create<AppState>()(
           browseArmed: false,
           browseWorkId: null,
           browseMediaIndex: 0,
+          tidyArmed: false,
+          tidyIds: [],
+          deleteIds: [],
+          deleteError: "",
+          dlOpen: false,
+          dlExpandedId: null,
           syncingBrowser: false,
           account: { nickname: "", douyinId: "" },
         });
@@ -149,9 +205,12 @@ export const useApp = create<AppState>()(
           filterReturnWorkId: null,
           browseArmed: false,
           browseWorkId: null,
+          tidyArmed: false,
+          tidyIds: [],
+          deleteIds: [],
         }),
       setFolder: (folderId) => set({ folderId, selectedIds: [] }),
-      setKind: (kind) => set({ kind, selectedIds: [], browseMediaIndex: 0 }),
+      setKind: (kind) => set({ kind, selectedIds: [], browseMediaIndex: 0, tidyIds: [] }),
       toggleSelect: (id) =>
         set((s) => ({
           selectedIds: s.selectedIds.includes(id)
@@ -205,7 +264,7 @@ export const useApp = create<AppState>()(
           set({ browseWorkId: null, browseMediaIndex: 0, browseArmed: false });
           return;
         }
-        set({ browseArmed: !get().browseArmed });
+        set({ browseArmed: !get().browseArmed, tidyArmed: false, tidyIds: [] });
       },
       openBrowse: (id) =>
         set({
@@ -214,9 +273,159 @@ export const useApp = create<AppState>()(
           browseMediaIndex: 0,
           libraryWorkId: null,
           viewerIndex: null,
+          tidyArmed: false,
+          tidyIds: [],
         }),
       closeBrowse: () => set({ browseWorkId: null, browseMediaIndex: 0, browseArmed: false }),
       setBrowseMediaIndex: (index) => set({ browseMediaIndex: Math.max(0, index) }),
+      armTidy: () => {
+        if (get().job.active) return;
+        if (get().tidyArmed) {
+          set({ tidyArmed: false, tidyIds: [] });
+          return;
+        }
+        set({
+          tidyArmed: true,
+          tidyIds: [],
+          browseArmed: false,
+          browseWorkId: null,
+        });
+      },
+      toggleTidy: (id) =>
+        set((s) => ({
+          tidyIds: s.tidyIds.includes(id) ? s.tidyIds.filter((x) => x !== id) : [...s.tidyIds, id],
+        })),
+      askDelete: (ids) => {
+        const unique = [...new Set(ids.filter(Boolean))];
+        if (!unique.length || get().job.active) return;
+        set({ deleteIds: unique, deleteError: "" });
+      },
+      cancelDelete: () => set({ deleteIds: [], deleteError: "" }),
+      confirmDelete: async () => {
+        const ids = get().deleteIds;
+        if (!ids.length || get().job.active) return;
+        const state = get();
+        const api = desktop();
+        if (api) {
+          const folderNames = Object.fromEntries(state.folders.map((f) => [f.id, f.name]));
+          const items = ids
+            .map((id) => state.works.find((w) => w.id === id))
+            .filter((w): w is Work => Boolean(w))
+            .map((w) => ({
+              id: w.id,
+              title: w.title,
+              folderName: folderNames[w.folderId] || "收藏",
+            }));
+          const res = await api.deleteWorks({ works: items });
+          if (!res.ok) {
+            set({ deleteError: res.error || "删除失败" });
+            return;
+          }
+        }
+        set((s) => ({
+          works: applyDeletedWorks(s.works, ids),
+          deleteIds: [],
+          deleteError: "",
+          tidyArmed: false,
+          tidyIds: [],
+          libraryWorkId: s.libraryWorkId && ids.includes(s.libraryWorkId) ? null : s.libraryWorkId,
+          viewerIndex: s.libraryWorkId && ids.includes(s.libraryWorkId) ? null : s.viewerIndex,
+          browseWorkId: s.browseWorkId && ids.includes(s.browseWorkId) ? null : s.browseWorkId,
+          filterReturnWorkId:
+            s.filterReturnWorkId && ids.includes(s.filterReturnWorkId) ? null : s.filterReturnWorkId,
+        }));
+      },
+
+      setDlOpen: (dlOpen) => set({ dlOpen }),
+      setDlExpanded: (dlExpandedId) => set({ dlExpandedId }),
+      pauseDlTask: (id) => {
+        const current = get().dlTasks.find((t) => t.workId === id);
+        if (current?.status === "downloading") abortDesktop("pause");
+        set((s) => ({ dlTasks: pauseTask(s.dlTasks, id), dlSpeed: 0 }));
+        kickDownload();
+      },
+      resumeDlTask: (id) => {
+        set((s) => ({ dlTasks: resumeTask(s.dlTasks, id), dlPauseAll: false }));
+        kickDownload();
+      },
+      pauseAllDl: () => {
+        abortDesktop("pause-all");
+        set((s) => ({ dlPauseAll: true, dlTasks: pauseDownloading(s.dlTasks), dlSpeed: 0 }));
+      },
+      resumeAllDl: () => {
+        set((s) => ({ dlPauseAll: false, dlTasks: resumePaused(s.dlTasks) }));
+        kickDownload();
+      },
+      cancelDlSoft: (ids) => {
+        const drop = new Set(ids);
+        set((s) => ({
+          dlTasks: s.dlTasks.filter((t) => !drop.has(t.workId)),
+          dlExpandedId: s.dlExpandedId && drop.has(s.dlExpandedId) ? null : s.dlExpandedId,
+        }));
+      },
+      askCancelDl: (ids) => {
+        const state = get();
+        const unique = [...new Set(ids)];
+        if (unique.some((id) => state.dlTasks.find((t) => t.workId === id)?.status === "downloading")) {
+          abortDesktop("cancel");
+        }
+        const hard = unique.filter((id) => {
+          const t = state.dlTasks.find((x) => x.workId === id);
+          return t && cancelNeedsConfirm(t);
+        });
+        const soft = unique.filter((id) => !hard.includes(id));
+        if (soft.length) {
+          const drop = new Set(soft);
+          set((s) => ({ dlTasks: s.dlTasks.filter((t) => !drop.has(t.workId)) }));
+        }
+        if (hard.length) set({ dlCancelIds: hard });
+      },
+      cancelCancelDl: () => set({ dlCancelIds: [] }),
+      confirmCancelDl: async () => {
+        const ids = get().dlCancelIds;
+        if (!ids.length) return;
+        abortDesktop("cancel");
+        const state = get();
+        const api = desktop();
+        if (api) {
+          const folderNames = Object.fromEntries(state.folders.map((f) => [f.id, f.name]));
+          const items = ids
+            .map((id) => state.works.find((w) => w.id === id))
+            .filter((w): w is Work => Boolean(w))
+            .map((w) => ({ id: w.id, title: w.title, folderName: folderNames[w.folderId] || "收藏" }));
+          const res = await api.deleteWorks({ works: items });
+          if (!res.ok) return;
+        }
+        const drop = new Set(ids);
+        set((s) => ({
+          works: applyDeletedWorks(s.works, ids),
+          dlTasks: s.dlTasks.filter((t) => !drop.has(t.workId)),
+          dlCancelIds: [],
+          dlExpandedId: s.dlExpandedId && drop.has(s.dlExpandedId) ? null : s.dlExpandedId,
+          libraryWorkId: s.libraryWorkId && ids.includes(s.libraryWorkId) ? null : s.libraryWorkId,
+        }));
+      },
+      retryDlTask: (id) => {
+        set((s) => ({
+          dlPauseAll: false,
+          dlTasks: resumeTask(s.dlTasks, id),
+        }));
+        kickDownload();
+      },
+      clearDlDone: () => set((s) => ({ dlTasks: s.dlTasks.filter((t) => t.status !== "done") })),
+      openWorkFolder: (workId) => {
+        const state = get();
+        const work = state.works.find((w) => w.id === workId);
+        const task = state.dlTasks.find((t) => t.workId === workId);
+        const folderName = state.folders.find((f) => f.id === (work?.folderId || task?.folderId))?.name || "收藏";
+        const title = work?.title || task?.title || "";
+        const api = desktop();
+        if (api) {
+          void api.openWorkFolder({ id: workId, title, folderName });
+          return;
+        }
+        window.alert(`本机路径（演示）\n${state.settings.rootPath}\\${folderName}\\${title}_${workId}`);
+      },
 
       refresh: async () => {
         const api = desktop();
@@ -270,49 +479,50 @@ export const useApp = create<AppState>()(
       startDownload: (ids) => {
         const unique = [...new Set(ids)];
         if (unique.length === 0) return;
+        const state = get();
+        const incoming = unique
+          .map((id) => state.works.find((w) => w.id === id))
+          .filter((w): w is Work => Boolean(w))
+          .filter((w) => workNeedsDownload(w))
+          .map(taskFromWork);
+        if (!incoming.length) return;
+        const next = enqueueTasks(state.dlTasks, incoming);
+        const added = next.length - state.dlTasks.length;
         const api = desktop();
+        set({
+          dlTasks: next,
+          dlOpen: true,
+          selectedIds: [],
+        });
         if (api) {
-          const state = get();
-          const works = unique
-            .map((id) => state.works.find((w) => w.id === id))
-            .filter((w): w is Work => Boolean(w));
-          const folderNames = Object.fromEntries(state.folders.map((f) => [f.id, f.name]));
           void api.setSettings(state.settings);
-          void api.download({ works, folderNames });
+          kickDownload();
           return;
         }
-        const wechat = Boolean(get().settings.pushplusToken || get().settings.wxpusherSpt);
-        if (unique.length >= 3) {
+        const wechat = Boolean(state.settings.pushplusToken || state.settings.wxpusherSpt);
+        if (added >= 3 && !state.captchaOpen) {
           set({
             captchaOpen: true,
             captchaReason: "download",
-            pendingDownloadIds: unique,
             toastWechat: wechat,
+            dlPauseAll: true,
           });
           return;
         }
-        void runDownload(unique);
+        kickDownload();
       },
 
       resolveCaptcha: () => {
-        const { captchaReason, pendingDownloadIds } = get();
+        const { captchaReason } = get();
         set({ captchaOpen: false, captchaReason: null, toastWechat: false });
         const api = desktop();
-        if (api) {
-          if (captchaReason === "download") {
-            const ids = pendingDownloadIds;
-            set({ pendingDownloadIds: [] });
-            get().startDownload(ids);
-          }
-          if (captchaReason === "refresh") void api.resumeRefresh();
+        if (captchaReason === "download") {
+          set({ dlPauseAll: false, pendingDownloadIds: [] });
+          kickDownload();
           return;
         }
-        if (captchaReason === "download") {
-          const ids = pendingDownloadIds;
-          set({ pendingDownloadIds: [] });
-          void runDownload(ids);
-        }
-        if (captchaReason === "refresh") {
+        if (api && captchaReason === "refresh") void api.resumeRefresh();
+        if (!api && captchaReason === "refresh") {
           const { works } = get();
           if (!works.some((w) => w.id === PENDING_REFRESH_WORK.id)) {
             set({ works: [PENDING_REFRESH_WORK, ...works] });
@@ -333,7 +543,7 @@ export const useApp = create<AppState>()(
       },
     }),
     {
-      name: "cangxia-v5",
+      name: "cangxia-v6",
       partialize: (s) => ({
         loggedIn: s.loggedIn,
         folders: s.folders,
@@ -343,7 +553,15 @@ export const useApp = create<AppState>()(
         folderId: s.folderId,
         kind: s.kind,
         tab: s.tab,
+        dlTasks: s.dlTasks,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        state.dlTasks = hydrateTasks(state.dlTasks || []);
+        state.dlPauseAll = false;
+        state.dlSpeed = 0;
+        state.dlOpen = false;
+      },
     },
   ),
 );
@@ -369,46 +587,4 @@ function mergeIncoming(existing: Work[], incoming: Work[]) {
     });
   }
   return [...byId.values()];
-}
-
-async function runDownload(ids: string[]) {
-  const queue = ids.filter((id) => {
-    const w = useApp.getState().works.find((x) => x.id === id);
-    return w && workNeedsDownload(w);
-  });
-  useApp.setState({
-    job: { active: true, current: 0, total: queue.length, message: "准备下载无水印原文件…" },
-  });
-  for (let i = 0; i < queue.length; i++) {
-    const id = queue[i];
-    const work = useApp.getState().works.find((w) => w.id === id);
-    const isVideo = Boolean(work && workVideos(work).length);
-    useApp.setState({
-      job: {
-        active: true,
-        current: i + 1,
-        total: queue.length,
-        message: isVideo ? `正在保存图片和原视频 ${work?.title ?? id}` : `正在保存 ${work?.title ?? id}`,
-      },
-    });
-    await wait(isVideo ? 720 : 520);
-    useApp.setState((s) => ({
-      works: s.works.map((w) => {
-        if (w.id !== id) return w;
-        if (w.kind === "video") {
-          const gotVideo = videoStatusOf(w) !== "missing";
-          return {
-            ...w,
-            status: "downloaded" as const,
-            videoStatus: gotVideo ? ("saved" as const) : ("missing" as const),
-          };
-        }
-        return { ...w, status: "downloaded" as const };
-      }),
-    }));
-  }
-  useApp.setState({
-    job: { active: false, current: 0, total: 0, message: "" },
-    selectedIds: [],
-  });
 }

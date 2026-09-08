@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ensureWorkFolder, readIndex, writeIndex, folderTitle } from "./layout.mjs";
+import { ensureWorkFolder, readIndex, writeIndex, folderTitle, deleteWorkFolders, exists } from "./layout.mjs";
 import { mapAweme, collectAwemes, mergeWorks } from "./aweme.mjs";
 
 test("folderTitle strips illegal chars and keeps id", () => {
@@ -121,4 +121,30 @@ test("mergeWorks keeps user tags and downloaded", () => {
   );
   assert.equal(merged[0].status, "downloaded");
   assert.deepEqual(merged[0].userTags, ["桌面"]);
+});
+
+test("deleteWorkFolders removes dir and index record", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cangxia-del-"));
+  try {
+    const work = {
+      id: "99",
+      title: "茶席蒸汽",
+      authorName: "桌面博物",
+      douyinId: "tablemuse",
+      kind: "album",
+    };
+    const result = await ensureWorkFolder({
+      rootPath: root,
+      folderName: "收藏",
+      work,
+      imageFiles: [{ name: "a.jpg", bytes: Buffer.from("fake-jpeg") }],
+    });
+    await writeIndex(root, [{ id: work.id, dir: result.dir, status: "downloaded" }]);
+    await deleteWorkFolders(root, [{ id: work.id, folderName: "收藏", title: work.title }]);
+    assert.equal(await exists(result.dir), false);
+    const index = await readIndex(root);
+    assert.equal(index.records.length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

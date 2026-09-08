@@ -1,4 +1,4 @@
-import { mkdir, writeFile, copyFile, access, readFile } from "node:fs/promises";
+import { mkdir, writeFile, copyFile, access, readFile, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -134,4 +134,30 @@ export async function readIndex(rootPath) {
   } catch {
     return { version: 1, records: [] };
   }
+}
+
+export async function deleteWorkFolders(rootPath, items) {
+  const index = await readIndex(rootPath);
+  const records = index.records || [];
+  const idSet = new Set(items.map((it) => it.id));
+  for (const item of items) {
+    const rec = records.find((r) => r.id === item.id);
+    const dir = rec?.dir || workDir(rootPath, item.folderName, item.title, item.id);
+    await rm(dir, { recursive: true, force: true });
+  }
+  await writeIndex(
+    rootPath,
+    records.filter((r) => !idSet.has(r.id)),
+  );
+  return { ok: true, deleted: items.map((it) => it.id) };
+}
+
+export async function writeWorkMeta(dir, work, folderName, videoStatus) {
+  const downloadedAt = new Date().toISOString();
+  await writeFile(
+    join(dir, "meta.json"),
+    `${JSON.stringify(metaPayload({ ...work, videoStatus, status: work.status ?? "downloaded" }, folderName, downloadedAt), null, 2)}\n`,
+    "utf8",
+  );
+  await writeDesktopIni(dir);
 }

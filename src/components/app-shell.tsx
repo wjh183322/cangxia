@@ -1,6 +1,9 @@
 import { RefreshCw, Settings, FolderClosed } from "lucide-react";
 import { CaptchaDialog } from "@/components/captcha-dialog";
 import { CollectView } from "@/components/collect-view";
+import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { DownloadCancelDialog } from "@/components/download-cancel-dialog";
+import { DownloadDrawer, DownloadMiniBar } from "@/components/download-drawer";
 import { LibraryView } from "@/components/library-view";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Button } from "@/components/ui/button";
@@ -59,6 +62,7 @@ export function AppShell() {
             <RefreshCw className={`size-4 ${job.active ? "animate-spin" : ""}`} />
             刷新
           </Button>
+          <DownloadMiniBar />
           <Button size="icon" variant="ghost" onClick={() => setSettingsOpen(true)} aria-label="设置">
             <Settings className="size-4" />
           </Button>
@@ -68,7 +72,7 @@ export function AppShell() {
         </div>
       </header>
 
-      {job.active && (
+      {syncingBrowser && (
         <div className="border-b border-line bg-surface px-4 py-2 text-xs text-muted">
           {job.message}
           {job.total > 0 && (
@@ -109,6 +113,9 @@ export function AppShell() {
       <CaptchaDialog />
       <SettingsDialog />
       <Viewer />
+      <DeleteConfirmDialog />
+      <DownloadCancelDialog />
+      <DownloadDrawer />
     </div>
   );
 }

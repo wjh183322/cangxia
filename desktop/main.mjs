@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, dialog, Notification, session, net } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell } from "electron";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureWorkFolder, readIndex, writeIndex } from "./lib/layout.mjs";
+import { readIndex, deleteWorkFolders, workDir } from "./lib/layout.mjs";
 import { collectAwemes, mapAweme, mapFolder } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
+import { abortDownload, runWork } from "./lib/engine.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -258,71 +259,73 @@ ipcMain.handle("cangxia:download", async (_e, payload) => {
   const { works, folderNames } = payload;
   const rootPath = settings.rootPath;
   if (!rootPath) return { ok: false, error: "未选择下载根目录" };
-  const index = await readIndex(rootPath);
-  const records = [...(index.records || [])];
-  const queue = works.filter((w) => {
-    const rec = records.find((r) => r.id === w.id);
-    if (w.status === "stale") return false;
-    if (!rec) return true;
-    if (w.kind === "video" || w.kind === "mixed") {
-      return rec.videoStatus !== "saved" || rec.status !== "downloaded";
-    }
-    return rec.status !== "downloaded";
-  });
-  for (let i = 0; i < queue.length; i++) {
-    const work = queue[i];
-    send("cangxia:progress", {
-      active: true,
-      current: i + 1,
-      total: queue.length,
-      message:
-        work.kind === "video" || work.kind === "mixed"
-          ? `正在保存图片和原视频 ${work.title}`
-          : `正在保存 ${work.title}`,
-    });
-    const folderName = folderNames[work.folderId] || "收藏";
-    const imageFiles = [];
-    for (const img of work.images || []) {
-      try {
-        const bytes = await fetchBytes(img.url);
-        imageFiles.push({ name: `${img.id}.jpg`, bytes });
-      } catch {
-        /* skip missing file */
-      }
-    }
-    const videoFiles = [];
-    const clips = work.videos?.length ? work.videos : work.videoUrl ? [{ url: work.videoUrl }] : [];
-    for (const clip of clips) {
-      try {
-        videoFiles.push({ bytes: await fetchBytes(clip.url) });
-      } catch {
-        /* skip missing clip */
-      }
-    }
-    if (imageFiles.length === 0 && videoFiles.length === 0) {
-      send("cangxia:work-status", { id: work.id, status: "no-origin" });
-      continue;
-    }
-    const saved = await ensureWorkFolder({
+  for (const work of works || []) {
+    const files = [
+      ...(work.images || []).map((img, i) => ({
+        key: img.id || `img-${i}`,
+        name: `图${i + 1}.jpg`,
+        type: "image",
+        url: img.url,
+        status: "waiting",
+      })),
+      ...((work.videos?.length ? work.videos : work.videoUrl ? [{ id: `${work.id}_v`, url: work.videoUrl }] : []) || []).map(
+        (clip, i) => ({
+          key: clip.id || `vid-${i}`,
+          name: `视频${i + 1}.mp4`,
+          type: "video",
+          url: clip.url,
+          status: "waiting",
+        }),
+      ),
+    ];
+    const res = await runWork({
+      work,
+      folderName: folderNames?.[work.folderId] || "收藏",
+      files,
       rootPath,
-      folderName,
-      work: {
-        ...work,
-        status: imageFiles.length ? "downloaded" : "no-origin",
-      },
-      imageFiles,
-      videoFiles,
+      session: douyinSession(),
+      send,
     });
-    const status = imageFiles.length ? "downloaded" : "no-origin";
-    const videoStatus = clips.length ? saved.videoStatus : "none";
-    const rec = { id: work.id, dir: saved.dir, status, videoStatus, at: new Date().toISOString() };
-    const idx = records.findIndex((r) => r.id === work.id);
-    if (idx >= 0) records[idx] = rec;
-    else records.push(rec);
-    await writeIndex(rootPath, records);
-    send("cangxia:work-status", { id: work.id, status, videoStatus });
+    if (res?.aborted) return res;
   }
   send("cangxia:progress", { active: false, current: 0, total: 0, message: "" });
+  return { ok: true };
+});
+
+ipcMain.handle("cangxia:dl-run", async (_e, payload) => {
+  const rootPath = settings.rootPath;
+  if (!rootPath) return { ok: false, error: "未选择下载根目录" };
+  return runWork({
+    work: payload.work,
+    folderName: payload.folderName || "收藏",
+    files: payload.files || [],
+    rootPath,
+    session: douyinSession(),
+    send,
+  });
+});
+
+ipcMain.handle("cangxia:dl-abort", async (_e, reason) => {
+  abortDownload(reason);
+  return { ok: true };
+});
+
+ipcMain.handle("cangxia:open-work-folder", async (_e, item) => {
+  const rootPath = settings.rootPath;
+  if (!rootPath) return { ok: false };
+  const index = await readIndex(rootPath);
+  const rec = (index.records || []).find((r) => r.id === item?.id);
+  const dir = rec?.dir || workDir(rootPath, item?.folderName || "收藏", item?.title, item?.id);
+  await shell.openPath(dir);
+  return { ok: true };
+});
+
+ipcMain.handle("cangxia:delete-works", async (_e, payload) => {
+  const rootPath = settings.rootPath;
+  if (!rootPath) return { ok: false, error: "未选择下载根目录" };
+  const items = payload?.works || [];
+  if (!items.length) return { ok: true, deleted: [] };
+  await deleteWorkFolders(rootPath, items);
   return { ok: true };
 });
 

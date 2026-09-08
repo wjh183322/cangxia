@@ -40,6 +40,14 @@ export function LibraryView() {
   const browseWorkId = useApp((s) => s.browseWorkId);
   const armBrowse = useApp((s) => s.armBrowse);
   const openBrowse = useApp((s) => s.openBrowse);
+  const tidyArmed = useApp((s) => s.tidyArmed);
+  const tidyIds = useApp((s) => s.tidyIds);
+  const armTidy = useApp((s) => s.armTidy);
+  const toggleTidy = useApp((s) => s.toggleTidy);
+  const askDelete = useApp((s) => s.askDelete);
+  const job = useApp((s) => s.job);
+  const dlBusy = useApp((s) => s.dlTasks.some((t) => t.status === "downloading"));
+  const busy = job.active || dlBusy;
   const [draftTag, setDraftTag] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTab, setPickerTab] = useState<"topic" | "user">("topic");
@@ -111,6 +119,14 @@ export function LibraryView() {
           </Button>
           <Button size="sm" variant="secondary" onClick={() => openBrowse(work.id)}>
             浏览
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={busy}
+            onClick={() => askDelete([work.id])}
+          >
+            删除
           </Button>
           <Button
             size="sm"
@@ -199,8 +215,30 @@ export function LibraryView() {
         <Button size="sm" variant={browseArmed ? "primary" : "secondary"} onClick={() => armBrowse()}>
           {browseArmed ? "点一条开始 · 再点取消" : "浏览"}
         </Button>
+        <Button
+          size="sm"
+          variant={tidyArmed ? "primary" : "secondary"}
+          disabled={busy}
+          onClick={() => armTidy()}
+        >
+          {tidyArmed ? "退出整理" : "整理"}
+        </Button>
+        {tidyArmed && (
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={busy || tidyIds.length === 0}
+            onClick={() => askDelete(tidyIds)}
+          >
+            删除选中（{tidyIds.length}）
+          </Button>
+        )}
         <p className="text-xs text-muted">
-          {browseArmed ? "点一条封面，从这条开始上下浏览。封面墙不会先打开作品。" : kindHint(kind, "library")}
+          {tidyArmed
+            ? "点封面勾选，再点删除选中。再点整理取消。"
+            : browseArmed
+              ? "点一条封面，从这条开始上下浏览。封面墙不会先打开作品。"
+              : kindHint(kind, "library")}
         </p>
       </div>
       <div className="grid grid-cols-2 gap-2 border-b border-line p-4 sm:grid-cols-4">
@@ -306,14 +344,20 @@ export function LibraryView() {
           </p>
         ) : (
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {filtered.map((w) => (
+            {filtered.map((w) => {
+              const checked = tidyIds.includes(w.id);
+              return (
               <li key={w.id}>
                 <button
                   type="button"
                   className={`w-full overflow-hidden rounded-lg border text-left hover:border-muted ${
-                    browseArmed ? "border-accent" : "border-line"
+                    tidyArmed && checked ? "border-accent" : browseArmed || tidyArmed ? "border-accent/60" : "border-line"
                   }`}
-                  onClick={() => (browseArmed ? openBrowse(w.id) : openLibraryWork(w.id))}
+                  onClick={() => {
+                    if (tidyArmed) toggleTidy(w.id);
+                    else if (browseArmed) openBrowse(w.id);
+                    else openLibraryWork(w.id);
+                  }}
                 >
                   <div className="relative aspect-portrait bg-raised">
                     <img src={w.coverUrl} alt="" className="size-full object-cover" />
@@ -321,6 +365,13 @@ export function LibraryView() {
                       <span className="absolute left-2 top-2 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] text-fg">
                         {kindChip(w)}
                       </span>
+                    )}
+                    {tidyArmed && (
+                      <span
+                        className={`absolute right-2 top-2 size-5 rounded-xs border ${
+                          checked ? "border-accent bg-accent" : "border-fg/70 bg-bg/40"
+                        }`}
+                      />
                     )}
                   </div>
                   <div className="space-y-1 p-2.5">
@@ -332,7 +383,8 @@ export function LibraryView() {
                   </div>
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>

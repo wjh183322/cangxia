@@ -32,9 +32,11 @@ export function videoStatusOf(work: Work) {
 
 export function workIsComplete(work: Work) {
   if (work.status === "stale") return true;
-  const videos = workVideos(work);
-  if (videos.length === 0) return work.status === "downloaded";
-  return work.status === "downloaded" && videoStatusOf(work) === "saved";
+  if (work.status !== "downloaded") return false;
+  if (work.kind === "video" || work.kind === "mixed") {
+    return videoStatusOf(work) === "saved";
+  }
+  return true;
 }
 
 export function workNeedsDownload(work: Work) {
@@ -67,4 +69,22 @@ export function workSlides(work: Work): MediaSlide[] {
         }))
       : [];
   return [...images, ...videos];
+}
+
+export function applyDeletedWorks(works: Work[], ids: string[]): Work[] {
+  const drop = new Set(ids);
+  const next: Work[] = [];
+  for (const w of works) {
+    if (!drop.has(w.id)) {
+      next.push(w);
+      continue;
+    }
+    if (w.status === "stale") continue;
+    next.push({
+      ...w,
+      status: "new",
+      videoStatus: workVideos(w).length ? "pending" : "none",
+    });
+  }
+  return next;
 }

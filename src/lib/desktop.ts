@@ -21,12 +21,21 @@ export interface DesktopApi {
   stopRefresh: () => Promise<{ ok: boolean }>;
   resumeRefresh: () => Promise<{ ok: boolean }>;
   download: (payload: { works: Work[]; folderNames: Record<string, string> }) => Promise<{ ok: boolean; error?: string }>;
+  deleteWorks: (payload: { works: { id: string; title: string; folderName: string }[] }) => Promise<{ ok: boolean; error?: string }>;
+  dlRun: (payload: {
+    work: Work;
+    folderName: string;
+    files: { key: string; name: string; type: "image" | "video"; url: string; status: string }[];
+  }) => Promise<{ ok?: boolean; paused?: boolean; aborted?: boolean; reason?: string; error?: string }>;
+  dlAbort: (reason: "pause" | "cancel" | "pause-all") => Promise<{ ok: boolean }>;
+  openWorkFolder: (payload: { id: string; title: string; folderName: string }) => Promise<{ ok: boolean }>;
   notifyCaptcha: () => Promise<{ ok: boolean }>;
   onProgress: (cb: (job: { active: boolean; current: number; total: number; message: string }) => void) => () => void;
   onCaptcha: (cb: (data: { reason: string }) => void) => () => void;
   onWorkStatus: (cb: (data: { id: string; status: Work["status"]; videoStatus?: Work["videoStatus"] }) => void) => () => void;
   onSyncCount: (cb: (data: { works: number; folders: number }) => void) => () => void;
   onRefreshDone: (cb: (data: { folders: Folder[]; works: Work[] }) => void) => () => void;
+  onDl: (cb: (data: Record<string, unknown>) => void) => () => void;
 }
 
 declare global {
