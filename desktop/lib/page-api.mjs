@@ -53,6 +53,9 @@ export function signUrlScript(method, url) {
       xhr.bdmsInvokeList = [
         { args: [${JSON.stringify(method)}, full, true], func: function () {} },
         { args: ["Accept", "application/json, text/plain, */*"], func: function () {} },
+        { args: ["bd-ticket-guard-web-version", 2], func: function () {} },
+        { args: ["bd-ticket-guard-version", 2], func: function () {} },
+        { args: ["bd-ticket-guard-iteration-version", 1], func: function () {} },
       ];
       xhr.invokeList = [
         { name: "addEventListener", args: ["load", null] },
@@ -63,6 +66,13 @@ export function signUrlScript(method, url) {
     return window.a_bogus || "";
   })()`;
 }
+
+export const NUDGE_MOUSE_SCRIPT = `(() => {
+  for (const type of ["mousemove", "mousedown", "mouseup", "click"]) {
+    document.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: 420, clientY: 280, view: window }));
+  }
+  return true;
+})()`;
 
 export function hookedXhrScript({ method = "GET", url, body = null }) {
   return `(() => new Promise((resolve) => {

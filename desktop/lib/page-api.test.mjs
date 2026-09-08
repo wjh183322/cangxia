@@ -14,10 +14,11 @@ test("parseCollectsList reads collects_id and name", () => {
   assert.equal(list[1].id, "222");
 });
 
-test("signUrlScript embeds collects path", () => {
+test("signUrlScript includes ticket-guard headers", () => {
   const src = signUrlScript("GET", "https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=111");
   assert.match(src, /collects_id=111/);
   assert.match(src, /bdmsInvokeList/);
+  assert.match(src, /bd-ticket-guard-version/);
 });
 
 test("nextCursor reads has_more", () => {

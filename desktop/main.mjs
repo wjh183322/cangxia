@@ -7,7 +7,7 @@ import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
 import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
-import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript } from "./lib/page-api.mjs";
+import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -43,6 +43,7 @@ let readingCollectsId = "";
 let readingInside = false;
 let lastHarvestMethod = "";
 let lastHarvestCount = 0;
+let lastHarvestError = "";
 let feedBuffer = [];
 let readChoiceResolve = null;
 let loginWaiting = false;
@@ -599,13 +600,22 @@ async function nativeFetchRequest(win, { method = "GET", path, query = {}, body 
   }
 }
 
+function noteHarvest(err) {
+  lastHarvestError = String(err || "").replace(/\s+/g, " ").slice(0, 48);
+}
+
 async function waitPageReady(win) {
   send("cangxia:progress", {
     active: true,
     current: 0,
     total: 1,
-    message: "等待抖音页面和接口签名，不用点收藏夹",
+    message: "等待抖音页面和接口签名（你不用点收藏夹）",
   });
+  try {
+    await win.webContents.executeJavaScript(NUDGE_MOUSE_SCRIPT);
+  } catch {
+    /* ignore */
+  }
   try {
     const ready = await win.webContents.executeJavaScript(waitBdmsScript());
     send("cangxia:progress", {
@@ -617,6 +627,12 @@ async function waitPageReady(win) {
   } catch {
     /* continue */
   }
+  try {
+    await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+  } catch {
+    /* ignore */
+  }
+  await sleep(1600);
 }
 
 async function harvestMcp(win, ctx) {
@@ -631,6 +647,7 @@ async function harvestMcp(win, ctx) {
     readingInside = false;
     const how = await openNamedFolder(win, ctx.folderName, { skipNav: true });
     if (how === "none") {
+      noteHarvest("没点进夹");
       send("cangxia:progress", {
         active: true,
         current: 0,
@@ -670,6 +687,7 @@ function jsonOk(json) {
 
 async function harvestVia(win, { folderId, folderName, max, started, label }, doRequest) {
   refreshReading = true;
+  lastHarvestError = "";
   const tag = label || "接口";
   if (folderName === "收藏") readingInside = true;
 
@@ -709,11 +727,12 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
         });
       }
       if (!jsonOk(res.json)) {
+        noteHarvest(`${res.status} ${res.json?.status_code ?? ""} ${res.json?.status_msg || res.text || ""}`);
         send("cangxia:progress", {
           active: true,
           current: countProgress(folderId, folderName, started),
           total: max,
-          message: `${tag} 收藏接口失败 ${res.status} ${res.json?.status_msg || res.text || ""}`.slice(0, 80),
+          message: `${tag} 收藏接口失败 ${lastHarvestError}`.slice(0, 90),
         });
         break;
       }
@@ -739,18 +758,20 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
     query: { cursor: "0", count: "40" },
   });
   if (jsonOk(listRes.json)) ingestPayload("https://www.douyin.com/aweme/v1/web/collects/list/", listRes.json);
+  else noteHarvest(`list ${listRes.status} ${listRes.json?.status_code ?? ""} ${listRes.json?.status_msg || listRes.text || ""}`);
   const parsed = parseCollectsList(listRes.json);
   for (const item of parsed) ensureFolder(item.name, item.id);
   const hit = parsed.find((x) => x.name === folderName);
   const id = String(hit?.id || folderIdByName(folderName) || "");
   if (!id || id.startsWith("folder_")) {
+    if (!lastHarvestError) noteHarvest(`没拿到「${folderName}」id`);
     send("cangxia:progress", {
       active: true,
       current: 0,
       total: max,
-      message: `${tag} 没拿到「${folderName}」的 id`.slice(0, 90),
+      message: `${tag} ${lastHarvestError}`.slice(0, 90),
     });
-    await sleep(1200);
+    await sleep(800);
     return 0;
   }
   readingCollectsId = id;
@@ -772,11 +793,12 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
       query: { collects_id: id, cursor: String(cursor), count: "10" },
     });
     if (!jsonOk(res.json)) {
+      noteHarvest(`${res.status} ${res.json?.status_code ?? ""} ${res.json?.status_msg || res.text || ""}`);
       send("cangxia:progress", {
         active: true,
         current: countProgress(folderId, folderName, started),
         total: max,
-        message: `${tag} 夹接口失败 ${res.status} ${res.json?.status_msg || res.text || ""}`.slice(0, 80),
+        message: `${tag} 夹接口失败 ${lastHarvestError}`.slice(0, 90),
       });
       break;
     }
@@ -891,10 +913,11 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   lastHarvestCount = 0;
   const ctx = { folderId, folderName, max, started, label: "" };
   const steps = [
-    ["1/4 页面fetch", () => harvestVia(win, ctx, nativeFetchRequest)],
-    ["2/4 页面XHR", () => harvestVia(win, ctx, hookedRequest)],
-    ["3/4 签名接口", () => harvestVia(win, ctx, signedRequest)],
-    ["4/4 cookie接口", () => harvestVia(win, ctx, netCookieRequest)],
+    ["1/5 页面fetch", () => harvestVia(win, ctx, nativeFetchRequest)],
+    ["2/5 页面XHR", () => harvestVia(win, ctx, hookedRequest)],
+    ["3/5 签名接口", () => harvestVia(win, ctx, signedRequest)],
+    ["4/5 cookie接口", () => harvestVia(win, ctx, netCookieRequest)],
+    ["5/5 程序进夹拦包", () => harvestMcp(win, ctx)],
   ];
   const tried = [];
   const addedSince = (before) => {
@@ -927,6 +950,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
           ? `${tried.join(" → ")} → 正在用 ${label} 读「${folderName}」`
           : `正在用 ${label} 读「${folderName}」`,
       });
+      lastHarvestError = "";
       const before = new Set(captured.keys());
       await run();
       const added = addedSince(before);
@@ -942,7 +966,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
         });
         return;
       }
-      tried.push(`${label} 没过`);
+      tried.push(lastHarvestError ? `${label} 没过(${lastHarvestError})` : `${label} 没过`);
       lastHarvestMethod = tried.join(" → ");
       const next = steps[i + 1];
       if (!next) break;
@@ -954,7 +978,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
       });
       await sleep(1400);
     }
-    lastHarvestMethod = `${tried.join(" → ")}，接口都没读到（不用点收藏夹，是签名/登录问题）`;
+    lastHarvestMethod = `${tried.join(" → ")}，都没读到`;
     lastHarvestCount = 0;
     send("cangxia:progress", {
       active: true,
