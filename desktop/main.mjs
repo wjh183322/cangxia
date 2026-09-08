@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell,
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readIndex, deleteWorkFolders, workDir } from "./lib/layout.mjs";
-import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder } from "./lib/aweme.mjs";
+import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, unwrapAweme } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
@@ -30,6 +30,9 @@ let refreshStop = false;
 let refreshPaused = false;
 let refreshReading = false;
 let readingFolderName = "";
+let readingMax = 300;
+let readingStarted = 0;
+let readingFolderId = "default";
 let readChoiceResolve = null;
 let loginWaiting = false;
 let captchaLock = false;
@@ -271,8 +274,16 @@ function ingestPayload(url, json) {
   if (!isCollectFeedUrl(url)) return;
   const awemes = collectAwemes(json);
   const reading = readingFolderName || "收藏";
+  const cap = Math.max(1, Number(readingMax) || 300);
   for (const aweme of awemes) {
-    const custom = folders.find((f) => f.id === String(aweme.collects_id || "") && !f.isDefault);
+    const inner = unwrapAweme(aweme) || aweme;
+    const id = String(inner.aweme_id || inner.id || aweme.aweme_id || "");
+    const isNew = id && !captured.has(id);
+    if (isNew && countProgress(readingFolderId, reading, readingStarted) >= cap) {
+      refreshReading = false;
+      break;
+    }
+    const custom = folders.find((f) => f.id === String(aweme.collects_id || inner.collects_id || "") && !f.isDefault);
     const folder =
       reading !== "收藏"
         ? ensureFolder(reading, aweme.collects_id || custom?.id)
@@ -318,6 +329,7 @@ async function snapshotWorks() {
 async function completeRefresh() {
   refreshReading = false;
   readingFolderName = "";
+  readingStarted = 0;
   closeProgressWindow();
   const snap = await snapshotWorks();
   send("cangxia:refresh-done", snap);
@@ -495,7 +507,10 @@ async function watchAndRead(win, max) {
         refreshReading = true;
         readingFolderName = state.name || "收藏";
         const folder = ensureFolder(readingFolderName);
-        const started = countInFolder(folder.id);
+        readingFolderId = folder.id;
+        readingMax = max;
+        readingStarted = countInFolder(folder.id);
+        const started = readingStarted;
         await scrollUntilCap(win, {
           folderId: folder.id,
           folderName: readingFolderName,
