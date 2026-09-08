@@ -495,7 +495,7 @@ async function drainPageFeeds(win) {
 
 async function waitForNewItems(prevCount, timeoutMs, folderName, folderId, started, max) {
   const t0 = Date.now();
-  let last = captured.size;
+  let last = countProgress(folderId, folderName, started);
   let lastChange = Date.now();
   while (Date.now() - t0 < timeoutMs && !refreshStop) {
     const got = countProgress(folderId, folderName, started);
@@ -507,13 +507,13 @@ async function waitForNewItems(prevCount, timeoutMs, folderName, folderId, start
     });
     if (got >= max) return true;
     await sleep(200);
-    if (captured.size !== last) {
-      last = captured.size;
+    if (got !== last) {
+      last = got;
       lastChange = Date.now();
     }
-    if (captured.size > prevCount && Date.now() - lastChange > 1100) return true;
+    if (got > prevCount && Date.now() - lastChange > 800) return true;
   }
-  return captured.size > prevCount;
+  return countProgress(folderId, folderName, started) > prevCount;
 }
 
 async function openFavoriteFresh(win) {
@@ -990,6 +990,7 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
 async function harvestByIntercept(win, { folderId, folderName, max, started }) {
   refreshReading = true;
   readingInside = true;
+  const deadline = Date.now() + 45000;
   send("cangxia:progress", {
     active: true,
     current: 0,
@@ -997,13 +998,15 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
     message: `正在读取「${folderName}」 0/${max}`,
   });
   await drainPageFeeds(win);
-  await waitForNewItems(captured.size, 8000, folderName, folderId, started, max);
-  if (countProgress(folderId, folderName, started) >= max) return countProgress(folderId, folderName, started);
+  let got = countProgress(folderId, folderName, started);
+  if (got < max) await waitForNewItems(got, 5000, folderName, folderId, started, max);
+  got = countProgress(folderId, folderName, started);
+  if (got >= max) return got;
   let idle = 0;
   while (win && !win.isDestroyed() && !refreshStop) {
     while (refreshPaused && !refreshStop) await sleep(400);
-    if (refreshStop || !win || win.isDestroyed()) break;
-    const got = countProgress(folderId, folderName, started);
+    if (refreshStop || !win || win.isDestroyed() || Date.now() > deadline) break;
+    got = countProgress(folderId, folderName, started);
     send("cangxia:progress", {
       active: true,
       current: Math.min(got, max),
@@ -1012,16 +1015,17 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
     });
     if (got >= max) break;
     if (!readingHasMore && got > 0) break;
-    const before = captured.size;
+    const before = got;
     await drainPageFeeds(win);
     await wheelBurst(win);
     await drainPageFeeds(win);
-    const grew = await waitForNewItems(before, 4000, folderName, folderId, started, max);
+    const grew = await waitForNewItems(before, 2500, folderName, folderId, started, max);
     await drainPageFeeds(win);
-    if (countProgress(folderId, folderName, started) >= max) break;
+    got = countProgress(folderId, folderName, started);
+    if (got >= max) break;
     if (grew) idle = 0;
     else idle += 1;
-    if (idle >= 4) break;
+    if (idle >= 3) break;
   }
   return countProgress(folderId, folderName, started);
 }
