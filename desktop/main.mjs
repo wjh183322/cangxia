@@ -234,9 +234,14 @@ function ingestPayload(url, json) {
     const work = mapAweme(aweme, folder);
     if (!work.id) continue;
     const prev = captured.get(work.id);
-    if (prev && prev.folderId !== work.folderId) {
-      work.alsoInFolderIds = [...new Set([...(prev.alsoInFolderIds || []), prev.folderId])];
-      work.folderId = prev.folderId;
+    if (prev) {
+      work.listIndex = prev.listIndex;
+      if (prev.folderId !== work.folderId) {
+        work.alsoInFolderIds = [...new Set([...(prev.alsoInFolderIds || []), prev.folderId])];
+        work.folderId = prev.folderId;
+      }
+    } else {
+      work.listIndex = captured.size;
     }
     captured.set(work.id, work);
   }
@@ -244,7 +249,7 @@ function ingestPayload(url, json) {
 }
 
 async function snapshotWorks() {
-  const works = [...captured.values()].sort((a, b) => b.collectedAt - a.collectedAt);
+  const works = [...captured.values()].sort((a, b) => (a.listIndex ?? 0) - (b.listIndex ?? 0));
   if (settings.rootPath) {
     const index = await readIndex(settings.rootPath);
     const downloaded = new Set((index.records || []).map((r) => r.id));

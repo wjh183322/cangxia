@@ -73,18 +73,32 @@ export function mapAweme(aweme, folder) {
     videoStatus,
     videoUrl: videos[0]?.url,
     videos,
-    collectedAt: (aweme.create_time || 0) * 1000,
+    collectedAt: (Number(aweme._collect_time || aweme.collects_time || aweme.collect_time) || 0) * 1000 || Date.now(),
+    listIndex: 0,
     images,
     coverUrl: images[0]?.url || "",
   };
 }
 
+export function unwrapAweme(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  if (raw.collects_name && !raw.aweme_id && !raw.aweme_info && !raw.aweme) return null;
+  const inner = raw.aweme_info || raw.aweme || raw.aweme_detail || raw;
+  const id = String(inner.aweme_id || inner.id || raw.aweme_id || "");
+  if (!id) return null;
+  inner.collects_id = inner.collects_id || raw.collects_id || raw.collection_id || "";
+  inner._collect_time = Number(raw.collects_time || raw.collect_time || inner.collects_time || inner.collect_time || 0);
+  return inner;
+}
+
 export function collectAwemes(payload) {
   if (!payload || typeof payload !== "object") return [];
   const data = payload.data || payload;
-  const lists = [data.aweme_list, data.list, data.items, data.collects_list, payload.aweme_list];
+  const lists = [data.aweme_list, data.list, data.items, payload.aweme_list];
   for (const list of lists) {
-    if (Array.isArray(list) && list.length) return list;
+    if (!Array.isArray(list) || !list.length) continue;
+    const awemes = list.map(unwrapAweme).filter(Boolean);
+    if (awemes.length) return awemes;
   }
   return [];
 }

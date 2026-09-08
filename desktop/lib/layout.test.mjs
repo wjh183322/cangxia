@@ -114,6 +114,20 @@ test("collectAwemes reads nested list", () => {
   assert.equal(list[0].aweme_id, "1");
 });
 
+test("collectAwemes unwraps aweme_info and keeps list order", () => {
+  const list = collectAwemes({
+    data: {
+      aweme_list: [
+        { aweme_info: { aweme_id: "top" }, collects_time: 9 },
+        { aweme_info: { aweme_id: "second" }, collects_time: 8 },
+      ],
+    },
+  });
+  assert.equal(list[0].aweme_id, "top");
+  assert.equal(list[1].aweme_id, "second");
+  assert.equal(list[0]._collect_time, 9);
+});
+
 test("mergeWorks keeps user tags and downloaded", () => {
   const merged = mergeWorks(
     [{ id: "1", userTags: ["桌面"], status: "downloaded", alsoInFolderIds: [] }],

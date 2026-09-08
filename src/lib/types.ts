@@ -36,6 +36,7 @@ export interface Work {
   videoUrl?: string;
   videos: WorkVideo[];
   collectedAt: number;
+  listIndex?: number;
   images: WorkImage[];
   coverUrl: string;
 }

@@ -147,7 +147,7 @@ export function listWorks(works: Work[], folderId: string, kind: KindFilter, hid
   const hidden = new Set(hiddenIds);
   return works
     .filter((w) => !hidden.has(w.id) && inFolder(w, folderId) && matchesKind(w, kind))
-    .sort((a, b) => b.collectedAt - a.collectedAt);
+    .sort((a, b) => (a.listIndex ?? 1e12) - (b.listIndex ?? 1e12) || b.collectedAt - a.collectedAt);
 }
 
 export const useApp = create<AppState>()(
@@ -657,6 +657,8 @@ async function wait(ms: number) {
 }
 
 function mergeIncoming(existing: Work[], incoming: Work[]) {
+  const incomingIds = new Set(incoming.map((w) => w.id));
+  const touchedFolders = new Set(incoming.map((w) => w.folderId));
   const byId = new Map(existing.map((w) => [w.id, w]));
   for (const w of incoming) {
     const prev = byId.get(w.id);
@@ -670,7 +672,14 @@ function mergeIncoming(existing: Work[], incoming: Work[]) {
       status: prev.status === "downloaded" || prev.status === "stale" ? prev.status : w.status,
       videoStatus: videoStatusOf(prev) === "saved" ? "saved" : w.videoStatus ?? videoStatusOf(prev),
       alsoInFolderIds: [...new Set([...(prev.alsoInFolderIds || []), ...w.alsoInFolderIds])],
+      listIndex: w.listIndex ?? prev.listIndex,
     });
+  }
+  for (const prev of existing) {
+    if (incomingIds.has(prev.id) || !touchedFolders.has(prev.folderId)) continue;
+    const cur = byId.get(prev.id);
+    if (!cur) continue;
+    byId.set(prev.id, { ...cur, listIndex: (cur.listIndex ?? 0) + 1_000_000 });
   }
   return [...byId.values()];
 }
