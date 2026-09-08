@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld("cangxia", {
   stopRefresh: () => ipcRenderer.invoke("cangxia:stop-refresh"),
   resumeRefresh: () => ipcRenderer.invoke("cangxia:resume-refresh"),
   download: (payload) => ipcRenderer.invoke("cangxia:download", payload),
+  deleteWorks: (payload) => ipcRenderer.invoke("cangxia:delete-works", payload),
+  dlRun: (payload) => ipcRenderer.invoke("cangxia:dl-run", payload),
+  dlAbort: (reason) => ipcRenderer.invoke("cangxia:dl-abort", reason),
+  openWorkFolder: (payload) => ipcRenderer.invoke("cangxia:open-work-folder", payload),
   notifyCaptcha: () => ipcRenderer.invoke("cangxia:notify-captcha"),
   onProgress: (cb) => {
     const fn = (_e, data) => cb(data);
@@ -36,5 +40,10 @@ contextBridge.exposeInMainWorld("cangxia", {
     const fn = (_e, data) => cb(data);
     ipcRenderer.on("cangxia:refresh-done", fn);
     return () => ipcRenderer.removeListener("cangxia:refresh-done", fn);
+  },
+  onDl: (cb) => {
+    const fn = (_e, data) => cb(data);
+    ipcRenderer.on("cangxia:dl", fn);
+    return () => ipcRenderer.removeListener("cangxia:dl", fn);
   },
 });
