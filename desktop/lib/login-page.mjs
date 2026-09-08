@@ -236,6 +236,63 @@ export function clickFolderCardScript(name) {
   })()`;
 }
 
+export function locateFolderCardScript(name) {
+  return `(() => {
+    const want = ${JSON.stringify(name)};
+    const textOf = (el) => (el.innerText || "").replace(/\\s+/g, "");
+    const hits = [];
+    for (const el of document.querySelectorAll("div, a, li, section")) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 200 || r.height < 88 || r.width > 560 || r.height > 340) continue;
+      if (r.bottom < 150 || r.top > innerHeight - 24) continue;
+      const t = textOf(el);
+      if (t.length > 48) continue;
+      if (t.startsWith(want + "共") && /共\\d+作品/.test(t)) {
+        hits.push({
+          how: "card",
+          x: Math.round(r.left + Math.min(96, r.width * 0.3)),
+          y: Math.round(r.top + Math.min(92, r.height * 0.48)),
+          len: t.length,
+          area: r.width * r.height,
+        });
+      }
+    }
+    hits.sort((a, b) => a.len - b.len || a.area - b.area);
+    if (hits[0]) return hits[0];
+    for (const el of document.querySelectorAll("div, a, li, span")) {
+      const r = el.getBoundingClientRect();
+      if (r.left > 400 || r.width < 80 || r.height < 32 || r.height > 92) continue;
+      const t = textOf(el);
+      if (t.length > want.length + 8) continue;
+      if (t === want || (t.startsWith(want) && /\\d{1,5}$/.test(t))) {
+        return { how: "row", x: Math.round(r.left + 48), y: Math.round(r.top + r.height / 2), len: t.length };
+      }
+    }
+    return { how: "none", x: 0, y: 0 };
+  })()`;
+}
+
+export function folderInsideScript(name) {
+  return `(() => {
+    const textOf = (el) => (el.innerText || "").replace(/\\s+/g, "");
+    const vis = (el, maxTop) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 8 && r.height > 8 && r.top < maxTop;
+    };
+    const hasBack = [...document.querySelectorAll("span, div, button, a")].some((el) => textOf(el) === "返回" && vis(el, 170));
+    const hasNew = [...document.querySelectorAll("span, div, button, a")].some((el) => textOf(el) === "新建收藏夹" && vis(el, 280));
+    const names = new Set();
+    for (const el of document.querySelectorAll("div, a, section")) {
+      const t = textOf(el);
+      if (t.length > 36) continue;
+      const m = t.match(/^(.{1,16}?)共\\d+作品/);
+      if (m && m[1] && !/收藏夹|视频|新建/.test(m[1])) names.add(m[1]);
+    }
+    const grid = names.size >= 3;
+    return { hasBack, hasNew, grid, ok: Boolean(hasBack || (hasNew && !grid)) };
+  })()`;
+}
+
 export const SCROLL_FEED_SCRIPT = `(() => {
   const step = 380;
   const isScrollable = (el) => {

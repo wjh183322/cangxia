@@ -6,7 +6,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, installFolderWatchScript, isHttpUrl, validFolderName } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -416,19 +416,58 @@ async function wheelBurst(win) {
   }
 }
 
+function mouseClick(win, x, y) {
+  const wc = win.webContents;
+  wc.sendInputEvent({ type: "mouseMove", x, y });
+  wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+  wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+}
+
 async function openNamedFolder(win, folderName) {
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: 1,
+    message: `正在打开收藏夹，准备点进「${folderName}」`,
+  });
   await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-  await sleep(2200);
+  await sleep(2500);
   await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
-  await sleep(2200);
-  let how = "none";
-  try {
-    how = await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
-  } catch {
-    how = "none";
+  await sleep(3500);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (refreshStop || !win || win.isDestroyed()) return "none";
+    let loc = { how: "none", x: 0, y: 0 };
+    try {
+      loc = await win.webContents.executeJavaScript(locateFolderCardScript(folderName));
+    } catch {
+      loc = { how: "none", x: 0, y: 0 };
+    }
+    if (loc?.how && loc.how !== "none" && loc.x) {
+      send("cangxia:progress", {
+        active: true,
+        current: 0,
+        total: 1,
+        message: `正在点进「${folderName}」`,
+      });
+      mouseClick(win, loc.x, loc.y);
+      await sleep(400);
+      try {
+        await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
+      } catch {
+        /* ignore */
+      }
+    }
+    await sleep(1800);
+    let inside = { ok: false };
+    try {
+      inside = await win.webContents.executeJavaScript(folderInsideScript(folderName));
+    } catch {
+      inside = { ok: false };
+    }
+    if (inside?.ok) return loc.how || "in";
+    await sleep(900);
   }
-  await sleep(1600);
-  return how;
+  return "none";
 }
 
 async function scrollUntilCap(win, { folderId, folderName, max, started }) {
