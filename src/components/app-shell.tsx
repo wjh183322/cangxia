@@ -24,6 +24,8 @@ export function AppShell() {
   const job = useApp((s) => s.job);
   const setSettingsOpen = useApp((s) => s.setSettingsOpen);
   const logout = useApp((s) => s.logout);
+  const openLoginGate = useApp((s) => s.openLoginGate);
+  const loggedIn = useApp((s) => s.loggedIn);
   const account = useApp((s) => s.account);
   const syncingBrowser = useApp((s) => s.syncingBrowser);
   const syncCount = useApp((s) => s.syncCount);
@@ -34,9 +36,11 @@ export function AppShell() {
         <div className="mr-2">
           <p className="text-sm font-semibold tracking-tight">藏匣</p>
           <p className="text-[11px] text-subtle">
-            {account.nickname || (isDesktop() ? "已登录" : "演示账号")}
-            {account.douyinId ? ` · ${account.douyinId}` : ""}
-            {isDesktop() ? " · 本机" : " · 预览"}
+            {loggedIn
+              ? `${account.nickname || "已登录"}${account.douyinId ? ` · ${account.douyinId}` : ""}${isDesktop() ? " · 本机" : " · 预览"}`
+              : isDesktop()
+                ? "未登录 · 可看清单和图库"
+                : "未登录 · 预览"}
           </p>
         </div>
         <div className="flex rounded-md bg-raised p-1">
@@ -67,9 +71,15 @@ export function AppShell() {
           <Button size="icon" variant="ghost" onClick={() => setSettingsOpen(true)} aria-label="设置">
             <Settings className="size-4" />
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => void logout()}>
-            退出
-          </Button>
+          {loggedIn ? (
+            <Button size="sm" variant="ghost" onClick={() => void logout()}>
+              退出
+            </Button>
+          ) : (
+            <Button size="sm" variant="ghost" onClick={() => openLoginGate()}>
+              登录
+            </Button>
+          )}
         </div>
       </header>
 

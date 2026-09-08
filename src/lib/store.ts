@@ -58,8 +58,12 @@ interface AppState {
   syncingBrowser: boolean;
   syncCount: { works: number; folders: number };
   hiddenCollectIds: string[];
+  loginGate: boolean;
+  pendingReadAfterLogin: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
+  openLoginGate: () => void;
+  skipLoginGate: () => void;
   setTab: (tab: AppTab) => void;
   setFolder: (id: string) => void;
   setKind: (kind: KindFilter) => void;
@@ -189,6 +193,8 @@ export const useApp = create<AppState>()(
       syncingBrowser: false,
       syncCount: { works: 0, folders: 0 },
       hiddenCollectIds: [],
+      loginGate: false,
+      pendingReadAfterLogin: false,
 
       login: async () => {
         const api = desktop();
@@ -196,24 +202,32 @@ export const useApp = create<AppState>()(
           const res = await api.login();
           if (res.ok && res.account) {
             const cleaned = stripDemoState(get());
+            const readNext = get().pendingReadAfterLogin;
             set({
               loggedIn: true,
+              loginGate: false,
+              pendingReadAfterLogin: false,
               account: res.account,
               works: cleaned.works,
               folders: cleaned.folders,
               folderId: cleaned.folderId,
               dlTasks: cleaned.dlTasks,
             });
+            if (readNext) void get().refresh();
           }
           return;
         }
-        set({ loggedIn: true, account: DEMO_USER });
+        const readNext = get().pendingReadAfterLogin;
+        set({ loggedIn: true, loginGate: false, pendingReadAfterLogin: false, account: DEMO_USER });
+        if (readNext) void get().refresh();
       },
       logout: async () => {
         const api = desktop();
         if (api) await api.logout();
         set({
           loggedIn: false,
+          loginGate: true,
+          pendingReadAfterLogin: false,
           selectedIds: [],
           libraryWorkId: null,
           viewerIndex: null,
@@ -231,6 +245,8 @@ export const useApp = create<AppState>()(
           account: { nickname: "", douyinId: "" },
         });
       },
+      openLoginGate: () => set({ loginGate: true, pendingReadAfterLogin: false }),
+      skipLoginGate: () => set({ loginGate: false, pendingReadAfterLogin: false }),
       setTab: (tab) =>
         set({
           tab,
@@ -463,6 +479,10 @@ export const useApp = create<AppState>()(
       },
 
       refresh: async () => {
+        if (!get().loggedIn) {
+          set({ loginGate: true, pendingReadAfterLogin: true });
+          return;
+        }
         const api = desktop();
         if (api) {
           await api.setSettings(get().settings);
@@ -625,6 +645,8 @@ export const useApp = create<AppState>()(
           state.dlTasks = hydrateTasks(cleaned.dlTasks || []);
         }
         state.hiddenCollectIds = state.hiddenCollectIds || [];
+        state.loginGate = false;
+        state.pendingReadAfterLogin = false;
       },
     },
   ),

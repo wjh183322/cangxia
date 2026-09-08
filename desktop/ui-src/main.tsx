@@ -8,7 +8,7 @@ import "./window.css";
 
 function Root() {
   const [hydrated, setHydrated] = useState(false);
-  const loggedIn = useApp((s) => s.loggedIn);
+  const loginGate = useApp((s) => s.loginGate);
 
   useEffect(() => {
     const unsub = useApp.persist.onFinishHydration(() => setHydrated(true));
@@ -23,7 +23,7 @@ function Root() {
   return (
     <>
       <DesktopBridge />
-      {loggedIn ? <AppShell /> : <LoginScreen />}
+      {loginGate ? <LoginScreen /> : <AppShell />}
     </>
   );
 }
