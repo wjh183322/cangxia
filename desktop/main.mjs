@@ -5,6 +5,7 @@ import { readIndex, deleteWorkFolders, workDir } from "./lib/layout.mjs";
 import { collectAwemes, mapAweme, mapFolder } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
+import { looksLikeCaptcha, OPEN_QR_SCRIPT } from "./lib/captcha.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -17,6 +18,10 @@ let folders = [{ id: "default", name: "收藏", isDefault: true }];
 let settings = { rootPath: "", pushplusToken: "", wxpusherSpt: "", maxPerRefresh: 300 };
 let refreshStop = false;
 let refreshPaused = false;
+let loginWaiting = false;
+let captchaLock = false;
+let lastCaptchaNotify = 0;
+let qrAssistGen = 0;
 
 function send(channel, payload) {
   mainWindow?.webContents.send(channel, payload);
@@ -64,8 +69,15 @@ function isLoggedInCookies(cookies) {
   return cookies.some((c) => ["sessionid", "sid_guard", "sessionid_ss"].includes(c.name) && c.value);
 }
 
-function looksLikeCaptcha(url) {
-  return /captcha|verify|sec_sdk|slide/i.test(url);
+function emitCaptcha(reason) {
+  if (captchaLock) return;
+  captchaLock = true;
+  refreshPaused = true;
+  send("cangxia:captcha", { reason: reason || "page" });
+}
+
+function clearCaptchaLock() {
+  captchaLock = false;
 }
 
 async function attachNetwork(win) {
@@ -80,8 +92,7 @@ async function attachNetwork(win) {
     if (method === "Network.responseReceived") {
       const url = params.response?.url || "";
       if (looksLikeCaptcha(url)) {
-        refreshPaused = true;
-        send("cangxia:captcha", { reason: "page" });
+        emitCaptcha("page");
         return;
       }
       if (!/aweme|collect/i.test(url) || params.response.mimeType?.includes("html")) return;
@@ -173,16 +184,17 @@ async function runRefreshLoop(win, max) {
   await completeRefresh();
 }
 
-function openDouyinWindow(path = "https://www.douyin.com/") {
+function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false } = {}) {
   if (douyinWindow && !douyinWindow.isDestroyed()) {
     douyinWindow.focus();
     void douyinWindow.loadURL(path);
+    if (assistQr) startQrAssist(douyinWindow);
     return douyinWindow;
   }
   douyinWindow = new BrowserWindow({
     width: 980,
     height: 760,
-    title: "抖音登录 / 收藏",
+    title: assistQr ? "抖音扫码登录" : "抖音登录 / 收藏",
     parent: mainWindow || undefined,
     webPreferences: {
       partition: PARTITION,
@@ -191,19 +203,45 @@ function openDouyinWindow(path = "https://www.douyin.com/") {
     },
   });
   void attachNetwork(douyinWindow);
+  douyinWindow.webContents.on("did-finish-load", () => {
+    if (loginWaiting) startQrAssist(douyinWindow);
+  });
   void douyinWindow.loadURL(path);
   douyinWindow.on("closed", () => {
     douyinWindow = null;
+    loginWaiting = false;
   });
   return douyinWindow;
 }
 
+function startQrAssist(win) {
+  const gen = ++qrAssistGen;
+  let tries = 0;
+  const tick = async () => {
+    if (gen !== qrAssistGen) return;
+    if (!win || win.isDestroyed() || !loginWaiting) return;
+    tries += 1;
+    if (tries > 25) return;
+    try {
+      const result = await win.webContents.executeJavaScript(OPEN_QR_SCRIPT);
+      if (result === "has-qr") return;
+    } catch {
+      return;
+    }
+    setTimeout(tick, 700);
+  };
+  setTimeout(tick, 400);
+}
+
 ipcMain.handle("cangxia:login", async () => {
-  const win = openDouyinWindow("https://www.douyin.com/");
+  loginWaiting = true;
+  const win = openDouyinWindow("https://www.douyin.com/", { assistQr: true });
   const deadline = Date.now() + 5 * 60 * 1000;
   while (Date.now() < deadline) {
     const cookies = await douyinSession().cookies.get({ domain: ".douyin.com" });
     if (isLoggedInCookies(cookies)) {
+      loginWaiting = false;
+      clearCaptchaLock();
       account = { nickname: "已登录", douyinId: "" };
       try {
         const names = cookies.find((c) => c.name === "sessionid");
@@ -213,9 +251,13 @@ ipcMain.handle("cangxia:login", async () => {
       }
       return { ok: true, account };
     }
-    if (win.isDestroyed()) return { ok: false, error: "登录窗口已关闭" };
+    if (win.isDestroyed()) {
+      loginWaiting = false;
+      return { ok: false, error: "登录窗口已关闭" };
+    }
     await sleep(800);
   }
+  loginWaiting = false;
   return { ok: false, error: "登录超时" };
 });
 
@@ -262,11 +304,13 @@ ipcMain.handle("cangxia:refresh", async () => {
 ipcMain.handle("cangxia:stop-refresh", async () => {
   refreshStop = true;
   refreshPaused = false;
+  clearCaptchaLock();
   return { ok: true };
 });
 
 ipcMain.handle("cangxia:resume-refresh", async () => {
   refreshPaused = false;
+  clearCaptchaLock();
   return { ok: true };
 });
 
@@ -346,7 +390,15 @@ ipcMain.handle("cangxia:delete-works", async (_e, payload) => {
   return { ok: true };
 });
 
+ipcMain.handle("cangxia:captcha-ack", async () => {
+  clearCaptchaLock();
+  return { ok: true };
+});
+
 ipcMain.handle("cangxia:notify-captcha", async () => {
+  const now = Date.now();
+  if (now - lastCaptchaNotify < 120000) return { ok: true, skipped: true };
+  lastCaptchaNotify = now;
   if (Notification.isSupported()) {
     new Notification({ title: "藏匣", body: "抖音弹出了验证码，请回电脑完成滑块。" }).show();
   }

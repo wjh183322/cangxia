@@ -21,6 +21,7 @@ export function DesktopBridge() {
     });
     const offCaptcha = api.onCaptcha(() => {
       const s = useApp.getState();
+      if (s.captchaOpen) return;
       s.pauseAllDl();
       useApp.setState({
         captchaOpen: true,

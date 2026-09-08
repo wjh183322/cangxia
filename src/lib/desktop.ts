@@ -30,6 +30,7 @@ export interface DesktopApi {
   dlAbort: (reason: "pause" | "cancel" | "pause-all") => Promise<{ ok: boolean }>;
   openWorkFolder: (payload: { id: string; title: string; folderName: string }) => Promise<{ ok: boolean }>;
   notifyCaptcha: () => Promise<{ ok: boolean }>;
+  captchaAck: () => Promise<{ ok: boolean }>;
   onProgress: (cb: (job: { active: boolean; current: number; total: number; message: string }) => void) => () => void;
   onCaptcha: (cb: (data: { reason: string }) => void) => () => void;
   onWorkStatus: (cb: (data: { id: string; status: Work["status"]; videoStatus?: Work["videoStatus"] }) => void) => () => void;

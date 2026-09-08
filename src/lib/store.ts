@@ -516,6 +516,7 @@ export const useApp = create<AppState>()(
         const { captchaReason } = get();
         set({ captchaOpen: false, captchaReason: null, toastWechat: false });
         const api = desktop();
+        if (api) void api.captchaAck();
         if (captchaReason === "download") {
           set({ dlPauseAll: false, pendingDownloadIds: [] });
           kickDownload();
@@ -539,6 +540,7 @@ export const useApp = create<AppState>()(
           toastWechat: false,
         });
         const api = desktop();
+        if (api) void api.captchaAck();
         if (api && syncing) void api.stopRefresh();
       },
     }),

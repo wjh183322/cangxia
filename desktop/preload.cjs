@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("cangxia", {
   dlAbort: (reason) => ipcRenderer.invoke("cangxia:dl-abort", reason),
   openWorkFolder: (payload) => ipcRenderer.invoke("cangxia:open-work-folder", payload),
   notifyCaptcha: () => ipcRenderer.invoke("cangxia:notify-captcha"),
+  captchaAck: () => ipcRenderer.invoke("cangxia:captcha-ack"),
   onProgress: (cb) => {
     const fn = (_e, data) => cb(data);
     ipcRenderer.on("cangxia:progress", fn);
