@@ -6,7 +6,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
 import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -671,22 +671,30 @@ async function harvestMcp(win, ctx) {
       } catch {
         tab = "none";
       }
-      if (tab === "clicked") break;
+      if (String(tab).startsWith("clicked")) break;
       await sleep(700);
     }
     send("cangxia:progress", {
       active: true,
       current: 0,
       total: ctx.max || 1,
-      message: tab === "clicked" ? "已打开收藏夹列表，正在点进目标夹" : "没找到「收藏夹」按钮，仍尝试点卡片",
+      message: String(tab).startsWith("clicked") ? `已打开收藏夹列表（${tab}），正在点进目标夹` : "没找到「收藏夹」按钮，改点左侧夹名",
     });
-    await sleep(tab === "clicked" ? 3200 : 1200);
+    await sleep(String(tab).startsWith("clicked") ? 3200 : 1200);
     readingCollectsId = "";
     readingInside = false;
     feedBuffer = [];
     const how = await openNamedFolder(win, ctx.folderName, { skipNav: true });
     if (how === "none") {
-      noteHarvest("没点进夹");
+      let probe = { side: [], cards: [] };
+      try {
+        probe = await win.webContents.executeJavaScript(installFolderWatchScript(folders.map((f) => f.name)));
+      } catch {
+        /* ignore */
+      }
+      const side = (probe?.side || []).join("/") || "无";
+      const cards = (probe?.cards || []).map((c) => c.name || c).join("/") || "无";
+      noteHarvest(`没点进夹 tab=${tab} 侧栏:${side} 卡片:${cards}`.slice(0, 48));
       send("cangxia:progress", {
         active: true,
         current: 0,
@@ -891,14 +899,13 @@ async function openNamedFolder(win, folderName, { skipNav = false } = {}) {
     await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
     await sleep(2500);
   }
-  readingCollectsId = (await waitFolderId(folderName)) || readingCollectsId || folderIdByName(folderName);
   send("cangxia:progress", {
     active: true,
     current: 0,
     total: 1,
-    message: readingCollectsId ? `已对准「${folderName}」，正在点进` : `正在点进「${folderName}」`,
+    message: `正在点进「${folderName}」`,
   });
-  await sleep(600);
+  await sleep(400);
   for (let attempt = 0; attempt < 8; attempt += 1) {
     if (refreshStop || !win || win.isDestroyed()) return "none";
     let inside = { ok: false };
@@ -910,9 +917,16 @@ async function openNamedFolder(win, folderName, { skipNav = false } = {}) {
     if (inside?.ok) return "in";
     let clicked = "none";
     try {
-      clicked = await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
+      clicked = await win.webContents.executeJavaScript(clickFolderSideScript(folderName));
     } catch {
       clicked = "none";
+    }
+    if (clicked === "none") {
+      try {
+        clicked = await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
+      } catch {
+        clicked = "none";
+      }
     }
     send("cangxia:progress", {
       active: true,

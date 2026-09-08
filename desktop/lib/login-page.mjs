@@ -175,7 +175,7 @@ export const OPEN_FAVORITE_SCRIPT = `(() => {
   const vis = (el) => {
     if (!el) return false;
     const r = el.getBoundingClientRect();
-    return r.width > 8 && r.height > 8 && r.top > 70 && r.top < 520;
+    return r.width > 8 && r.height > 8 && r.top > 36 && r.top < 620 && r.bottom > 0;
   };
   const nodes = [...document.querySelectorAll("span, div, a, button, p, li")];
   const fav = nodes.find((el) => vis(el) && el.childElementCount <= 5 && textOf(el) === "收藏");
@@ -186,14 +186,17 @@ export const OPEN_FAVORITE_SCRIPT = `(() => {
 
 export const CLICK_FOLDER_TAB_SCRIPT = `(() => {
   const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
-  const nodes = [...document.querySelectorAll("span, div, a, button, p, li")];
-  const hit = nodes.find((el) => {
+  const vis = (el) => {
     const r = el.getBoundingClientRect();
-    return r.width > 8 && r.height > 8 && r.top > 90 && r.top < 420 && textOf(el) === "收藏夹";
-  });
-  if (!hit) return "none";
-  (hit.closest("a, button, [role='tab']") || hit).click();
-  return "clicked";
+    return r.width > 8 && r.height > 8 && r.bottom > 0 && r.top < innerHeight;
+  };
+  const nodes = [...document.querySelectorAll("span, div, a, button, p, li")];
+  const hits = nodes.filter((el) => vis(el) && textOf(el) === "收藏夹" && el.childElementCount <= 6);
+  hits.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  if (!hits[0]) return "none";
+  const r = hits[0].getBoundingClientRect();
+  (hits[0].closest("a, button, [role='tab']") || hits[0]).click();
+  return "clicked:" + Math.round(r.top);
 })()`;
 
 export function normalizeFolderText(s) {
@@ -216,6 +219,30 @@ export function validFolderName(name) {
   if (!n || n.length > 16) return false;
   if (/收藏夹|视频|音乐|合集|短剧|新建|添加视频|批量管理|返回|观看历史|稍后再看|我的预约/.test(n)) return false;
   return true;
+}
+
+export function clickFolderSideScript(name) {
+  return `(() => {
+    const want = ${JSON.stringify(name)};
+    ${FOLDER_TEXT_HELPER}
+    const nw = norm(want);
+    const hits = [];
+    for (const el of document.querySelectorAll("div, a, li, span, p, button")) {
+      const r = el.getBoundingClientRect();
+      if (r.left > 520 || r.top < 70 || r.bottom > innerHeight - 4) continue;
+      if (r.width < 48 || r.width > 520 || r.height < 20 || r.height > 110) continue;
+      const t = textOf(el);
+      if (!t || t.length > 28) continue;
+      const rest = t.startsWith(nw) ? t.slice(nw.length) : "";
+      if (t === nw || (rest && (/^\\d/.test(rest) || rest.startsWith("共")))) {
+        hits.push({ el, t, len: t.length, x: Math.round(r.left + Math.min(36, r.width / 2)), y: Math.round(r.top + r.height / 2) });
+      }
+    }
+    hits.sort((a, b) => a.len - b.len);
+    if (!hits[0]) return "none";
+    (hits[0].el.closest("a, button, li, [role='button']") || hits[0].el).click();
+    return "side:" + hits[0].t.slice(0, 20);
+  })()`;
 }
 
 export function clickFolderCardScript(name) {
