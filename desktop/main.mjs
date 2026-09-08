@@ -459,17 +459,30 @@ async function watchAndRead(win, max) {
     active: true,
     current: 0,
     total: max,
-    message: "已打开抖音。请点进「收藏」，或再点左边某个收藏夹",
+    message: "请点「收藏」读总收藏，或点「收藏夹」再点某一个夹",
   });
   while (win && !win.isDestroyed() && !refreshStop) {
-    let state = { view: "other", name: "" };
+    let state = { view: "other", name: "", cards: [] };
     try {
       state = await win.webContents.executeJavaScript(installFolderWatchScript(folders.map((f) => f.name)));
     } catch {
       break;
     }
+    for (const card of state?.cards || []) {
+      if (card?.name) ensureFolder(card.name);
+    }
+    if (state.view === "folder-grid") {
+      send("cangxia:progress", {
+        active: true,
+        current: 0,
+        total: max,
+        message: `已打开收藏夹封面墙（${(state.cards || []).length} 个），请点「玛丽罗斯」等某一个`,
+      });
+      await sleep(600);
+      continue;
+    }
     const key = `${state?.view || "other"}:${state?.name || ""}`;
-    if ((state.view === "favorite" || state.view === "folder") && state.name && !denied.has(key)) {
+    if ((state.view === "favorite" || state.view === "folder") && state.name && state.name !== "收藏夹" && !denied.has(key)) {
       send("cangxia:progress", {
         active: true,
         current: 0,
@@ -498,7 +511,7 @@ async function watchAndRead(win, max) {
         active: true,
         current: 0,
         total: max,
-        message: "未读取。可点另一个收藏夹，或点停止",
+        message: "未读取。请点「收藏夹」里的某一个夹，或点停止",
       });
     }
     await sleep(800);

@@ -267,49 +267,68 @@ export function installFolderWatchScript(knownNames = []) {
   const known = ${known};
   const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
   const skip = /^(作品|推荐|喜欢|收藏|收藏夹|视频|音乐|合集|短剧|话题|特效|精选|关注|朋友|我的|直播|批量管理|新建收藏夹|观看历史|稍后再看|我的预约|我的收藏夹)$/;
-  if (!window.__cangxiaWatch) window.__cangxiaWatch = { view: "other", name: "" };
+  const parseCard = (raw) => {
+    const t = String(raw || "");
+    const m = t.match(/^(.{1,24}?)共\\d+作品/);
+    if (!m) return "";
+    return m[1].replace(/锁|🔒/g, "").trim();
+  };
+  const listCards = () => {
+    const seen = new Map();
+    for (const el of document.querySelectorAll("div, a, li, section")) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 140 || r.height < 70) continue;
+      const t = textOf(el);
+      const m = t.match(/^(.{1,24}?)共(\\d+)作品/);
+      if (!m) continue;
+      const name = m[1].replace(/锁|🔒/g, "").trim();
+      if (!name || skip.test(name)) continue;
+      const prev = seen.get(name);
+      if (!prev || t.length < prev.len) seen.set(name, { name, count: Number(m[2]), len: t.length });
+    }
+    return [...seen.values()].map(({ name, count }) => ({ name, count }));
+  };
+  if (!window.__cangxiaWatch) window.__cangxiaWatch = { view: "other", name: "", cards: [] };
   if (!window.__cangxiaWatchBound) {
     window.__cangxiaWatchBound = true;
     document.addEventListener("click", (e) => {
       let n = e.target;
       let best = "";
-      for (let i = 0; i < 8 && n; i += 1) {
+      let card = "";
+      for (let i = 0; i < 14 && n; i += 1) {
         const raw = textOf(n);
-        if (!raw || raw.length > 36) {
-          n = n.parentElement;
-          continue;
-        }
+        const fromCard = parseCard(raw);
+        if (fromCard) card = fromCard;
         if (raw === "作品" || raw === "推荐" || raw === "喜欢" || raw === "观看历史" || raw === "稍后再看") {
-          window.__cangxiaWatch = { view: "other", name: "" };
+          window.__cangxiaWatch = { view: "other", name: "", cards: listCards() };
           return;
         }
-        if (raw === "收藏") {
-          if (!best) best = "收藏";
-          n = n.parentElement;
-          continue;
+        if (raw === "收藏夹") {
+          window.__cangxiaWatch = { view: "folder-grid", name: "", cards: listCards() };
+          return;
         }
+        if (raw === "收藏" && !card) best = best || "收藏";
         const t = raw.replace(/\\d{1,6}$/, "").trim();
-        const knownHit = known.find((k) => k !== "收藏" && (t === k || t.startsWith(k)));
+        const knownHit = known.find((k) => k !== "收藏" && t && (t === k || t.startsWith(k)));
         if (knownHit) best = knownHit;
-        else if (t && !skip.test(t) && t.length >= 2 && t.length <= 24 && t.length >= best.length && best !== "收藏") {
-          best = t;
-        } else if (t && !skip.test(t) && t.length >= 2 && t.length <= 24 && !best) {
-          best = t;
-        }
         n = n.parentElement;
       }
-      if (best === "收藏") window.__cangxiaWatch = { view: "favorite", name: "收藏" };
-      else if (best) window.__cangxiaWatch = { view: "folder", name: best };
+      if (card) {
+        window.__cangxiaWatch = { view: "folder", name: card, cards: listCards() };
+        return;
+      }
+      if (best && best !== "收藏") {
+        window.__cangxiaWatch = { view: "folder", name: best, cards: listCards() };
+        return;
+      }
+      if (best === "收藏") window.__cangxiaWatch = { view: "favorite", name: "收藏", cards: listCards() };
     }, true);
   }
-  const nodes = [...document.querySelectorAll("span, div, a, button, p")];
-  const hasCollects = nodes.some((el) => {
-    const r = el.getBoundingClientRect();
-    return r.width > 8 && r.height > 8 && textOf(el) === "收藏夹";
-  });
-  if (hasCollects && window.__cangxiaWatch.view === "other") {
-    window.__cangxiaWatch = { view: "favorite", name: "收藏" };
+  const cards = listCards();
+  if (cards.length >= 2 && window.__cangxiaWatch.view !== "folder") {
+    window.__cangxiaWatch = { view: "folder-grid", name: "", cards };
   }
+  window.__cangxiaWatch.cards = cards;
   return window.__cangxiaWatch;
 })()`;
 }
