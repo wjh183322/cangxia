@@ -317,8 +317,11 @@ async function pumpQr(win) {
     } catch {
       /* page not ready */
     }
-    if (tries === 20 && !last && qrWindow && !qrWindow.isDestroyed()) {
-      qrWindow.webContents.send("cangxia:qr-status", "正在打开登录页…若较久没出码，请再点一次扫码登录");
+    if (tries === 8 && !last && qrWindow && !qrWindow.isDestroyed()) {
+      qrWindow.webContents.send("cangxia:qr-status", "正在打开抖音登录页，请稍候…");
+    }
+    if (tries === 25 && !last && qrWindow && !qrWindow.isDestroyed()) {
+      qrWindow.webContents.send("cangxia:qr-status", "还没拿到码。请确认网络能打开抖音，或关掉后重试。");
     }
     await sleep(700);
   }

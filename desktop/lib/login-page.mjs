@@ -82,39 +82,81 @@ export const LOGIN_PAGE_SCRIPT = `(() => {
 })()`;
 
 export const EXTRACT_QR_SCRIPT = `(() => {
-  function grab(doc) {
-    if (!doc) return null;
-    const imgs = [...doc.querySelectorAll("img")];
-    const hit = imgs.find((img) => {
-      const blob = ((img.src || "") + " " + (img.className || "") + " " + (img.alt || "")).toLowerCase();
-      if (img.naturalWidth && img.naturalWidth < 80) return false;
-      if (/qr|qrcode|二维码/.test(blob)) return true;
-      return img.naturalWidth >= 140 && img.naturalWidth === img.naturalHeight && img.naturalWidth <= 480;
-    });
-    if (hit) {
-      if (hit.src && (hit.src.startsWith("data:") || hit.src.startsWith("http") || hit.src.startsWith("blob:"))) {
-        return hit.src;
+  function nearScan(el) {
+    let p = el;
+    for (let i = 0; i < 10 && p; i += 1) {
+      const t = (p.innerText || "") + " " + (p.className || "");
+      if (/扫码登录|二维码登录|打开.{0,6}抖音APP|扫一扫/.test(t) || /qrcode|qr-code|qrCode/i.test(t)) return true;
+      p = p.parentElement;
+    }
+    return false;
+  }
+
+  function looksNamed(el) {
+    const blob = ((el.src || "") + " " + (el.className || "") + " " + (el.alt || "") + " " + (el.id || "")).toLowerCase();
+    return /qrcode|qr-code|qrcode_|\\/qr\\/|passport.{0,40}qr/.test(blob);
+  }
+
+  function mostlyMono(canvas) {
+    try {
+      const ctx = canvas.getContext("2d");
+      const { data, width, height } = ctx.getImageData(0, 0, Math.min(width, 240), Math.min(height, 240));
+      let colorful = 0;
+      let n = 0;
+      for (let i = 0; i < data.length; i += 32) {
+        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+        if (a < 80) continue;
+        n += 1;
+        if (Math.max(r, g, b) - Math.min(r, g, b) > 48) colorful += 1;
       }
+      return n > 40 && colorful / n < 0.18;
+    } catch {
+      return false;
+    }
+  }
+
+  function toSrc(el, doc) {
+    if (el.tagName === "IMG") {
+      const src = el.src || "";
+      if (src.startsWith("data:") || src.startsWith("blob:") || /qrcode|\\/qr/i.test(src)) return src;
       try {
         const c = doc.createElement("canvas");
-        c.width = hit.naturalWidth || 240;
-        c.height = hit.naturalHeight || 240;
-        c.getContext("2d").drawImage(hit, 0, 0);
+        c.width = el.naturalWidth || 240;
+        c.height = el.naturalHeight || 240;
+        c.getContext("2d").drawImage(el, 0, 0);
+        if (!mostlyMono(c)) return null;
         return c.toDataURL("image/png");
       } catch {
-        /* tainted */
+        return src.startsWith("http") ? src : null;
       }
     }
-    const canvas = [...doc.querySelectorAll("canvas")].find((c) => c.width >= 80 && Math.abs(c.width - c.height) < 8);
-    if (canvas) {
+    if (el.tagName === "CANVAS") {
+      if (!mostlyMono(el)) return null;
       try {
-        return canvas.toDataURL("image/png");
+        return el.toDataURL("image/png");
       } catch {
-        /* tainted */
+        return null;
       }
     }
     return null;
   }
+
+  function grab(doc) {
+    if (!doc) return null;
+    const nodes = [...doc.querySelectorAll("img, canvas")];
+    const ranked = nodes.filter((el) => {
+      const w = el.naturalWidth || el.width || 0;
+      const h = el.naturalHeight || el.height || 0;
+      if (w < 100 || h < 100) return false;
+      return looksNamed(el) || nearScan(el);
+    });
+    for (const el of ranked) {
+      const src = toSrc(el, doc);
+      if (src) return src;
+    }
+    return null;
+  }
+
   let data = grab(document);
   if (data) return data;
   for (const frame of document.querySelectorAll("iframe")) {
@@ -127,3 +169,4 @@ export const EXTRACT_QR_SCRIPT = `(() => {
   }
   return null;
 })()`;
+
