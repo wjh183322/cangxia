@@ -46,9 +46,15 @@ let lastHarvestCount = 0;
 let lastHarvestError = "";
 let netTrace = [];
 
+function shortUrl(url) {
+  const s = String(url || "");
+  const host = ((s.match(/^https?:\/\/([^/]+)/i) || [])[1] || "").replace(/\.douyin\.com$/i, "").replace(/^www-?/i, "");
+  const path = s.replace(/^https?:\/\/[^/]+/i, "").split("?")[0];
+  return `${host}${path}`.slice(-56);
+}
+
 function traceNet(url, tag) {
-  const short = String(url || "").replace(/^https:\/\/www\.douyin\.com/i, "").slice(0, 72);
-  netTrace.push(`${tag}:${short}`);
+  netTrace.push(`${tag}:${shortUrl(url)}`);
   if (netTrace.length > 16) netTrace.shift();
 }
 let feedBuffer = [];
@@ -312,20 +318,33 @@ function ingestPayload(url, json) {
       }
     }
   }
-  if (!refreshReading) return;
+  if (!refreshReading) {
+    if (isFolderListUrl(url)) {
+      /* folders already handled */
+    } else {
+      traceNet(url, "noread");
+    }
+    return;
+  }
   const isList = /listcollection/i.test(url);
-  const isFolderFeed = /collects\/video\/list|collects\/aweme\/list|collects\/item\/list|\/web\/collects\//i.test(url) && !/collects\/list\/?(?:\?|$)/i.test(url);
-  if (readingPattern === "listcollection" ? !isList : !isFolderFeed) return;
+  const hasCollectsQuery = /collects_id=\d+/i.test(url);
+  const isFolderFeed =
+    hasCollectsQuery ||
+    (/collects\/video\/list|collects\/aweme\/list|collects\/item\/list|\/web\/collects\//i.test(url) &&
+      !/collects\/list\/?(?:\?|$)/i.test(url));
+  if (readingPattern === "listcollection" ? !isList : !isFolderFeed) {
+    traceNet(url, isList ? "skip-总收藏" : "skip");
+    return;
+  }
   const root = json.data || json;
   const collectsMatch = String(url).match(/collects_id=(\d+)/);
   const feedId = String(collectsMatch?.[1] || root?.collects_id || "");
   const named = (readingFolderName || "收藏") !== "收藏";
   if (named && isFolderFeed) {
     if (!readingInside) {
-      if (feedId) {
-        feedBuffer.push({ url, json, feedId, at: Date.now() });
-        if (feedBuffer.length > 24) feedBuffer.shift();
-      }
+      feedBuffer.push({ url, json, feedId, at: Date.now() });
+      if (feedBuffer.length > 24) feedBuffer.shift();
+      traceNet(url, "buf");
       return;
     }
     if (!readingCollectsId && feedId) readingCollectsId = feedId;
@@ -336,6 +355,12 @@ function ingestPayload(url, json) {
     readingHasMore = Boolean(Number(root.has_more));
   }
   const awemes = collectAwemes(json);
+  if (!awemes.length) {
+    const code = json.status_code ?? json.data?.status_code ?? "";
+    const msg = json.status_msg || json.data?.status_msg || "";
+    traceNet(url, `empty${code}${msg ? `:${String(msg).slice(0, 12)}` : ""}`);
+    return;
+  }
   const reading = readingFolderName || "收藏";
   const cap = Math.max(1, Number(readingMax) || 300);
   for (const aweme of awemes) {
@@ -452,14 +477,16 @@ async function drainPageFeeds(win) {
   try {
     const feeds = await win.webContents.executeJavaScript(DRAIN_PAGE_FEEDS_SCRIPT);
     for (const f of feeds || []) {
+      const rawUrl = String(f.url || "");
+      const url = /^https?:/i.test(rawUrl) ? rawUrl : `https://www.douyin.com${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`;
       let json = null;
       try {
         json = JSON.parse(f.text);
       } catch {
         json = null;
       }
-      if (json) ingestPayload(f.url, json);
-      traceNet(f.url, json ? "page" : "page-raw");
+      if (json) ingestPayload(url, json);
+      traceNet(url, json ? "page" : "page-raw");
     }
   } catch {
     /* ignore */
@@ -652,7 +679,7 @@ async function nativeFetchRequest(win, { method = "GET", path, query = {}, body 
 }
 
 function noteHarvest(err) {
-  lastHarvestError = String(err || "").replace(/\s+/g, " ").slice(0, 48);
+  lastHarvestError = String(err || "").replace(/\s+/g, " ").slice(0, 96);
 }
 
 async function waitPageReady(win) {
@@ -756,8 +783,7 @@ async function harvestMcp(win, ctx) {
     } catch {
       res = [];
     }
-    const hint = (res || []).map((u) => String(u).split("?")[0].slice(-28)).join(",") || "无资源";
-    noteHarvest(`拦包0条 ${(netTrace.slice(-2).join("|") || "无net")} ${hint}`.slice(0, 48));
+    noteHarvest(`拦包0条 ${(netTrace.slice(-3).join("|") || "无net")}`.slice(0, 90));
   }
   return got;
 }

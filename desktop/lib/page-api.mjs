@@ -58,7 +58,7 @@ export const HOOK_PAGE_FEEDS_SCRIPT = `(() => {
   window.__cxFeeds = [];
   const push = (url, text) => {
     const u = String(url || "");
-    if (!/collect|favorite|listcollection/i.test(u)) return;
+    if (!/aweme\/v1\/web|collect|favorite|listcollection/i.test(u)) return;
     window.__cxFeeds.push({ url: u, text: String(text || "").slice(0, 800000) });
     if (window.__cxFeeds.length > 30) window.__cxFeeds.shift();
   };
