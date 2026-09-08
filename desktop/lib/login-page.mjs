@@ -288,12 +288,28 @@ export function installFolderWatchScript(knownNames = []) {
   return `(() => {
   const known = ${known};
   const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
-  const skip = /^(作品|推荐|喜欢|收藏|收藏夹|视频|音乐|合集|短剧|话题|特效|精选|关注|朋友|我的|直播|批量管理|新建收藏夹|观看历史|稍后再看|我的预约|我的收藏夹)$/;
+  const skipName = /^(作品|推荐|喜欢|收藏|收藏夹|视频|音乐|合集|短剧|话题|特效|精选|关注|朋友|我的|直播|批量管理|新建收藏夹|观看历史|稍后再看|我的预约|我的收藏夹|添加视频|返回|搜索你收藏的作品)$/;
+  const stripLock = (s) => String(s || "").replace(/[🔒锁★☆\\u2B50\\u2605\\u2606]/g, "");
   const parseCard = (raw) => {
-    const t = String(raw || "");
+    const t = stripLock(raw);
     const m = t.match(/^(.{1,24}?)共\\d+作品/);
+    return m ? m[1].trim() : "";
+  };
+  const parseRow = (raw) => {
+    const t = stripLock(raw);
+    const m = t.match(/^(.{1,24}?)(\\d{1,5})$/);
     if (!m) return "";
-    return m[1].replace(/锁|🔒/g, "").trim();
+    const name = m[1].trim();
+    if (!name || skipName.test(name) || /^\\d+$/.test(name)) return "";
+    return name;
+  };
+  const lumOf = (el) => {
+    const bg = getComputedStyle(el).backgroundColor || "";
+    const m = bg.match(/[\\d.]+/g);
+    if (!m) return null;
+    const a = m.length === 4 ? Number(m[3]) : 1;
+    if (a < 0.08) return null;
+    return (Number(m[0]) + Number(m[1]) + Number(m[2])) * a;
   };
   const listCards = () => {
     const seen = new Map();
@@ -304,11 +320,58 @@ export function installFolderWatchScript(knownNames = []) {
       const m = t.match(/^(.{1,24}?)共(\\d+)作品/);
       if (!m) continue;
       const name = m[1].replace(/锁|🔒/g, "").trim();
-      if (!name || skip.test(name)) continue;
+      if (!name || skipName.test(name)) continue;
       const prev = seen.get(name);
       if (!prev || t.length < prev.len) seen.set(name, { name, count: Number(m[2]), len: t.length });
     }
     return [...seen.values()].map(({ name, count }) => ({ name, count }));
+  };
+  const listSide = () => {
+    const seen = new Map();
+    for (const el of document.querySelectorAll("div, a, li, span, p, button")) {
+      const r = el.getBoundingClientRect();
+      if (r.left > 400 || r.top < 125 || r.bottom > innerHeight - 6) continue;
+      if (r.width < 72 || r.width > 400 || r.height < 28 || r.height > 90) continue;
+      const name = parseRow(textOf(el));
+      if (!name) continue;
+      const lum = lumOf(el);
+      const selected = el.getAttribute("aria-selected") === "true" || /active|selected|current/i.test(el.className || "");
+      const prev = seen.get(name);
+      const len = textOf(el).length;
+      if (!prev || len < prev.len) seen.set(name, { name, selected, lum, len });
+      else {
+        if (selected) prev.selected = true;
+        if (prev.lum == null && lum != null) prev.lum = lum;
+      }
+    }
+    return [...seen.values()];
+  };
+  const hasText = (label, maxTop) =>
+    [...document.querySelectorAll("span, div, button, a, p")].some((el) => {
+      if (textOf(el) !== label) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 8 && r.height > 8 && r.top < (maxTop || innerHeight);
+    });
+  const pickSelected = (side) => {
+    if (!side.length) return "";
+    const marked = side.find((s) => s.selected);
+    if (marked) return marked.name;
+    const withLum = side.filter((s) => s.lum != null);
+    if (withLum.length >= 2) {
+      const lums = withLum.map((s) => s.lum).sort((a, b) => a - b);
+      const med = lums[Math.floor(lums.length / 2)];
+      let best = withLum[0];
+      let bestDiff = 0;
+      for (const s of withLum) {
+        const d = Math.abs(s.lum - med);
+        if (d > bestDiff) {
+          bestDiff = d;
+          best = s;
+        }
+      }
+      if (bestDiff > 10) return best.name;
+    }
+    return "";
   };
   if (!window.__cangxiaWatch) window.__cangxiaWatch = { view: "other", name: "", cards: [] };
   if (!window.__cangxiaWatchBound) {
@@ -317,37 +380,50 @@ export function installFolderWatchScript(knownNames = []) {
       let n = e.target;
       let best = "";
       let card = "";
-      for (let i = 0; i < 14 && n; i += 1) {
+      let row = "";
+      for (let i = 0; i < 18 && n; i += 1) {
         const raw = textOf(n);
         const fromCard = parseCard(raw);
         if (fromCard) card = fromCard;
+        const fromRow = parseRow(raw);
+        if (fromRow) row = fromRow;
         if (raw === "作品" || raw === "推荐" || raw === "喜欢" || raw === "观看历史" || raw === "稍后再看") {
           window.__cangxiaWatch = { view: "other", name: "", cards: listCards() };
           return;
         }
         if (raw === "收藏夹") {
-          window.__cangxiaWatch = { view: "folder-grid", name: "", cards: listCards() };
+          window.__cangxiaWatch = { view: "folder-list", name: "", cards: listCards() };
           return;
         }
-        if (raw === "收藏" && !card) best = best || "收藏";
-        const t = raw.replace(/\\d{1,6}$/, "").trim();
+        if (raw === "收藏" && !card && !row) best = best || "收藏";
+        const t = stripLock(raw).replace(/\\d{1,6}$/, "").trim();
         const knownHit = known.find((k) => k !== "收藏" && t && (t === k || t.startsWith(k)));
         if (knownHit) best = knownHit;
         n = n.parentElement;
       }
-      if (card) {
-        window.__cangxiaWatch = { view: "folder", name: card, cards: listCards() };
-        return;
-      }
-      if (best && best !== "收藏") {
-        window.__cangxiaWatch = { view: "folder", name: best, cards: listCards() };
+      const name = card || row || (best && best !== "收藏" ? best : "");
+      if (name) {
+        window.__cangxiaWatch = { view: "folder", name, cards: listCards() };
         return;
       }
       if (best === "收藏") window.__cangxiaWatch = { view: "favorite", name: "收藏", cards: listCards() };
     }, true);
   }
   const cards = listCards();
-  if (cards.length >= 2 && window.__cangxiaWatch.view !== "folder") {
+  const side = listSide();
+  const hasPanel = hasText("新建收藏夹", 280);
+  const hasBack = hasText("返回", 160);
+  const selected = pickSelected(side);
+  if (hasPanel || hasBack) {
+    const name = window.__cangxiaWatch.view === "folder" && window.__cangxiaWatch.name && window.__cangxiaWatch.name !== "收藏夹"
+      ? window.__cangxiaWatch.name
+      : selected;
+    if (name && name !== "收藏夹") {
+      window.__cangxiaWatch = { view: "folder", name, cards, side: side.map((s) => s.name) };
+    } else {
+      window.__cangxiaWatch = { view: "folder-list", name: "", cards, side: side.map((s) => s.name) };
+    }
+  } else if (cards.length >= 2 && window.__cangxiaWatch.view !== "folder") {
     window.__cangxiaWatch = { view: "folder-grid", name: "", cards };
   }
   window.__cangxiaWatch.cards = cards;

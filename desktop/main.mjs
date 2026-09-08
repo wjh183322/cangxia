@@ -523,12 +523,16 @@ async function watchAndRead(win, max) {
     for (const card of state?.cards || []) {
       if (card?.name) ensureFolder(card.name);
     }
-    if (state.view === "folder-grid") {
+    for (const name of state?.side || []) {
+      if (name) ensureFolder(name);
+    }
+    if (state.view === "folder-grid" || state.view === "folder-list") {
+      const names = (state.side || []).length ? state.side.join("、") : `${(state.cards || []).length} 个`;
       send("cangxia:progress", {
         active: true,
         current: 0,
         total: max,
-        message: `已打开收藏夹封面墙（${(state.cards || []).length} 个），请点「玛丽罗斯」等某一个`,
+        message: `已打开收藏夹列表（${names}）。请点左侧某一个夹，例如玛丽罗斯`,
       });
       await sleep(600);
       continue;
