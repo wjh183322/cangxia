@@ -306,6 +306,16 @@ export const WORK_GRID_POINT_SCRIPT = `(() => {
   return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
 })()`;
 
+export const PAGE_COLLECTS_ID_SCRIPT = `(() => {
+  const blob = [location.href];
+  try {
+    for (const e of performance.getEntriesByType("resource")) blob.push(e.name);
+  } catch {}
+  const text = blob.join("\\n");
+  const m = text.match(/collects_id=(\\d{4,})/) || text.match(/collects_id[\"':=]+(\\d{4,})/);
+  return m ? m[1] : "";
+})()`;
+
 export const SCROLL_FEED_SCRIPT = `(() => {
   const step = 380;
   const isScrollable = (el) => {

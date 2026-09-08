@@ -6,7 +6,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -38,6 +38,8 @@ let readingHasMore = true;
 let readingOrder = 0;
 let seenThisRead = new Set();
 let readingCollectsId = "";
+let readingInside = false;
+let feedBuffer = [];
 let readChoiceResolve = null;
 let loginWaiting = false;
 let captchaLock = false;
@@ -283,7 +285,8 @@ function ensureFolder(name, id) {
 
 function ingestPayload(url, json) {
   if (isFolderListUrl(url)) {
-    const list = (json.data || json).collects_list;
+    const data = json.data || json;
+    const list = data.collects_list || data.list || json.collects_list;
     if (Array.isArray(list)) {
       for (const [i, raw] of list.entries()) {
         const mapped = mapFolder(raw, i);
@@ -295,14 +298,19 @@ function ingestPayload(url, json) {
   }
   if (!refreshReading) return;
   const isList = /listcollection/i.test(url);
-  const isFolderFeed = /collects\/video\/list/i.test(url);
+  const isFolderFeed = /collects\/video\/list|collects\/aweme\/list|collects\/item\/list/i.test(url);
   if (readingPattern === "listcollection" ? !isList : !isFolderFeed) return;
   const root = json.data || json;
   const collectsMatch = String(url).match(/collects_id=(\d+)/);
   const feedId = String(collectsMatch?.[1] || root?.collects_id || "");
+  if (isFolderFeed && !readingInside) {
+    feedBuffer.push({ url, json, feedId, at: Date.now() });
+    if (feedBuffer.length > 24) feedBuffer.shift();
+    return;
+  }
   if (isFolderFeed) {
-    if (!readingCollectsId) return;
-    if (feedId && feedId !== readingCollectsId) return;
+    if (readingCollectsId && feedId && feedId !== readingCollectsId) return;
+    if (!readingCollectsId && feedId) readingCollectsId = feedId;
   }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
@@ -351,6 +359,22 @@ function ingestPayload(url, json) {
   send("cangxia:sync-count", { works: captured.size, folders: folders.length });
 }
 
+function replayFolderBuffer() {
+  const recent = feedBuffer.filter((x) => Date.now() - x.at < 25000);
+  feedBuffer = [];
+  let pick = recent;
+  if (readingCollectsId) {
+    const matched = recent.filter((x) => x.feedId === readingCollectsId);
+    if (matched.length) pick = matched;
+    else pick = recent.slice(-1);
+  } else if (recent.length) {
+    pick = recent.slice(-1);
+    if (pick[0]?.feedId) readingCollectsId = pick[0].feedId;
+  }
+  readingInside = true;
+  for (const item of pick) ingestPayload(item.url, item.json);
+}
+
 async function snapshotWorks() {
   const works = [...captured.values()].map((w) => {
     if (seenThisRead.size && !seenThisRead.has(w.id)) {
@@ -373,6 +397,8 @@ async function completeRefresh() {
   refreshReading = false;
   readingFolderName = "";
   readingStarted = 0;
+  readingInside = false;
+  feedBuffer = [];
   seenThisRead = new Set();
   closeProgressWindow();
   send("cangxia:refresh-done", snap);
@@ -516,6 +542,8 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   readingHasMore = true;
   seenThisRead = new Set();
   readingCollectsId = "";
+  readingInside = false;
+  feedBuffer = [];
   try {
     await openFavoriteFresh(win);
     if (folderName && folderName !== "收藏") {
@@ -531,11 +559,21 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
         });
         return;
       }
+      try {
+        const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
+        if (pageId) readingCollectsId = String(pageId);
+      } catch {
+        /* ignore */
+      }
+      readingInside = true;
+      replayFolderBuffer();
       send("cangxia:progress", {
         active: true,
         current: Math.min(countProgress(folderId, folderName, started), max),
         total: max,
-        message: `已进入「${folderName}」，开始读取`,
+        message: readingCollectsId
+          ? `已进入「${folderName}」，开始读取`
+          : `已进入「${folderName}」，用进夹后的接口读取`,
       });
       if (countProgress(folderId, folderName, started) === 0) {
         try {
