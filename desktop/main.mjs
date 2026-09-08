@@ -7,6 +7,7 @@ import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
 import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
+import { commonQuery, dyApiScript, parseCollectsList, nextCursor } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -447,6 +448,13 @@ async function openFavoriteFresh(win) {
   await sleep(2800);
 }
 
+function mouseClick(win, x, y) {
+  const wc = win.webContents;
+  wc.sendInputEvent({ type: "mouseMove", x, y });
+  wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+  wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+}
+
 async function wheelBurst(win) {
   const wc = win.webContents;
   let x = 760;
@@ -476,11 +484,119 @@ async function wheelBurst(win) {
   }
 }
 
-function mouseClick(win, x, y) {
-  const wc = win.webContents;
-  wc.sendInputEvent({ type: "mouseMove", x, y });
-  wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
-  wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+async function sessionMsToken() {
+  try {
+    const list = await session.fromPartition(PARTITION).cookies.get({ domain: ".douyin.com" });
+    return list.find((c) => c.name === "msToken")?.value || "";
+  } catch {
+    return "";
+  }
+}
+
+async function pageApi(win, opts, timeoutMs = 20000) {
+  const msToken = await sessionMsToken();
+  const query = commonQuery({ ...(opts.query || {}), ...(msToken ? { msToken } : {}) });
+  const script = dyApiScript({ ...opts, query });
+  try {
+    const result = await Promise.race([
+      win.webContents.executeJavaScript(script, true),
+      sleep(timeoutMs).then(() => ({ status: 0, json: null, text: "timeout" })),
+    ]);
+    return result || { status: 0, json: null, text: "empty" };
+  } catch (err) {
+    return { status: 0, json: null, text: String(err?.message || err) };
+  }
+}
+
+function jsonOk(json) {
+  if (!json || typeof json !== "object") return false;
+  const code = json.status_code;
+  if (code !== undefined && Number(code) !== 0) return false;
+  return true;
+}
+
+async function harvestByApi(win, { folderId, folderName, max, started }) {
+  readingInside = true;
+  refreshReading = true;
+  if (folderName === "收藏") {
+    let cursor = 0;
+    for (let page = 0; page < 80; page += 1) {
+      if (refreshStop || !win || win.isDestroyed()) return countProgress(folderId, folderName, started);
+      if (countProgress(folderId, folderName, started) >= max) return countProgress(folderId, folderName, started);
+      send("cangxia:progress", {
+        active: true,
+        current: Math.min(countProgress(folderId, folderName, started), max),
+        total: max,
+        message: `接口读取「收藏」 ${countProgress(folderId, folderName, started)}/${max}`,
+      });
+      const body = `cursor=${cursor}&count=10`;
+      let res = await pageApi(win, {
+        method: "POST",
+        path: "https://www.douyin.com/aweme/v1/web/aweme/listcollection/",
+        query: { count: "10", cursor: String(cursor) },
+        body,
+      });
+      if (!jsonOk(res.json) || !collectAwemes(res.json).length) {
+        res = await pageApi(win, {
+          method: "GET",
+          path: "https://www.douyin.com/aweme/v1/web/aweme/listcollection/",
+          query: { count: "10", cursor: String(cursor) },
+        });
+      }
+      if (!jsonOk(res.json)) break;
+      ingestPayload("https://www.douyin.com/aweme/v1/web/aweme/listcollection/", res.json);
+      const next = nextCursor(res.json, cursor);
+      if (!next.hasMore) break;
+      if (String(next.cursor) === String(cursor)) break;
+      cursor = next.cursor;
+      await sleep(400);
+    }
+    return countProgress(folderId, folderName, started);
+  }
+
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: max,
+    message: `接口列出收藏夹，定位「${folderName}」`,
+  });
+  const listRes = await pageApi(win, {
+    method: "GET",
+    path: "https://www.douyin.com/aweme/v1/web/collects/list/",
+    query: { cursor: "0", count: "40" },
+  });
+  if (jsonOk(listRes.json)) ingestPayload("https://www.douyin.com/aweme/v1/web/collects/list/", listRes.json);
+  const parsed = parseCollectsList(listRes.json);
+  for (const item of parsed) ensureFolder(item.name, item.id);
+  const hit = parsed.find((x) => x.name === folderName) || parsed.find((x) => x.name.includes(folderName));
+  const id = String(hit?.id || folderIdByName(folderName) || "");
+  if (!id) return 0;
+  readingCollectsId = id;
+  let cursor = 0;
+  for (let page = 0; page < 80; page += 1) {
+    if (refreshStop || !win || win.isDestroyed()) return countProgress(folderId, folderName, started);
+    if (countProgress(folderId, folderName, started) >= max) return countProgress(folderId, folderName, started);
+    send("cangxia:progress", {
+      active: true,
+      current: Math.min(countProgress(folderId, folderName, started), max),
+      total: max,
+      message: `接口读取「${folderName}」 ${countProgress(folderId, folderName, started)}/${max}`,
+    });
+    const url = `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`;
+    const res = await pageApi(win, {
+      method: "GET",
+      path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
+      query: { collects_id: id, cursor: String(cursor), count: "10" },
+    });
+    if (!jsonOk(res.json)) break;
+    ingestPayload(url, res.json);
+    const next = nextCursor(res.json, cursor);
+    if (!next.hasMore) break;
+    if (String(next.cursor) === String(cursor)) break;
+    cursor = next.cursor;
+    await sleep(400);
+  }
+  return countProgress(folderId, folderName, started);
 }
 
 async function openNamedFolder(win, folderName) {
@@ -546,8 +662,19 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   feedBuffer = [];
   try {
     await openFavoriteFresh(win);
-    if (folderName && folderName !== "收藏") {
-      refreshReading = true;
+    refreshReading = true;
+    readingInside = true;
+    const viaApi = await harvestByApi(win, { folderId, folderName, max, started });
+    if (viaApi > 0) return;
+    if (folderName === "收藏") {
+      await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+    } else {
+      send("cangxia:progress", {
+        active: true,
+        current: 0,
+        total: max,
+        message: `接口没读到「${folderName}」，改点进该夹`,
+      });
       readingCollectsId = folderIdByName(folderName);
       const how = await openNamedFolder(win, folderName);
       if (how === "none") {
@@ -555,36 +682,12 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
           active: true,
           current: 0,
           total: max,
-          message: `没点进「${folderName}」，已停止。请再点读取收藏后进这个夹`,
+          message: `没点进「${folderName}」，已停止`,
         });
         return;
       }
-      try {
-        const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
-        if (pageId) readingCollectsId = String(pageId);
-      } catch {
-        /* ignore */
-      }
       readingInside = true;
       replayFolderBuffer();
-      send("cangxia:progress", {
-        active: true,
-        current: Math.min(countProgress(folderId, folderName, started), max),
-        total: max,
-        message: readingCollectsId
-          ? `已进入「${folderName}」，开始读取`
-          : `已进入「${folderName}」，用进夹后的接口读取`,
-      });
-      if (countProgress(folderId, folderName, started) === 0) {
-        try {
-          await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
-        } catch {
-          /* ignore */
-        }
-      }
-    } else {
-      refreshReading = true;
-      await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
     }
   } catch {
     return;
