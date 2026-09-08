@@ -44,6 +44,19 @@ export function DesktopBridge() {
     });
     const offDl = api.onDl((ev) => applyDesktopDlEvent(ev as Parameters<typeof applyDesktopDlEvent>[0]));
     void api.setSettings(useApp.getState().settings);
+    let saveTimer = 0;
+    const unsub = useApp.subscribe((s) => {
+      window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(() => {
+        if (!s.settings.rootPath) return;
+        void api.saveList({
+          works: s.works,
+          folders: s.folders,
+          hiddenCollectIds: s.hiddenCollectIds,
+          chosenFolderIds: s.chosenFolderIds,
+        });
+      }, 800);
+    });
     return () => {
       offProgress();
       offStatus();
@@ -52,6 +65,8 @@ export function DesktopBridge() {
       offPick();
       offCaptcha();
       offDl();
+      unsub();
+      window.clearTimeout(saveTimer);
     };
   }, []);
   return null;

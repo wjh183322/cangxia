@@ -17,6 +17,14 @@ export interface DesktopApi {
     wxpusherSpt?: string;
     maxPerRefresh?: number;
   }) => Promise<{ ok: boolean }>;
+  paths: () => Promise<{ userData: string; appName: string; listFile: string }>;
+  saveList: (payload: {
+    works: Work[];
+    folders: Folder[];
+    hiddenCollectIds: string[];
+    chosenFolderIds: string[];
+  }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+  openListFile: () => Promise<{ ok: boolean }>;
   refresh: (opts?: {
     folderName?: string;
     knownIds?: string[];

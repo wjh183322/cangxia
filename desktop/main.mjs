@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell, Menu, protocol } from "electron";
 import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { readIndex, deleteWorkFolders, workDir, relocateWorkFolder } from "./lib/layout.mjs";
 import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, unwrapAweme } from "./lib/aweme.mjs";
@@ -1500,6 +1501,45 @@ ipcMain.handle("cangxia:pick-root", async () => {
 
 ipcMain.handle("cangxia:set-settings", async (_e, next) => {
   settings = { ...settings, ...next };
+  return { ok: true };
+});
+
+ipcMain.handle("cangxia:paths", async () => {
+  const listFile = settings.rootPath ? join(settings.rootPath, ".cangxia", "works.json") : "";
+  return {
+    userData: app.getPath("userData"),
+    appName: app.getName(),
+    listFile,
+  };
+});
+
+ipcMain.handle("cangxia:save-list", async (_e, payload = {}) => {
+  const root = String(settings.rootPath || "").trim();
+  if (!root) return { ok: false, error: "no-root" };
+  const dir = join(root, ".cangxia");
+  await mkdir(dir, { recursive: true });
+  const file = join(dir, "works.json");
+  await writeFile(
+    file,
+    JSON.stringify(
+      {
+        works: payload.works || [],
+        folders: payload.folders || [],
+        hiddenCollectIds: payload.hiddenCollectIds || [],
+        chosenFolderIds: payload.chosenFolderIds || [],
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  return { ok: true, path: file };
+});
+
+ipcMain.handle("cangxia:open-list-file", async () => {
+  const file = settings.rootPath ? join(settings.rootPath, ".cangxia", "works.json") : "";
+  if (!file) return { ok: false };
+  await shell.showItemInFolder(file);
   return { ok: true };
 });
 

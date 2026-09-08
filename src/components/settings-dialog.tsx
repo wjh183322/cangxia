@@ -1,12 +1,21 @@
 import { Button } from "@/components/ui/button";
 import { desktop, isDesktop } from "@/lib/desktop";
 import { useApp } from "@/lib/store";
+import { useEffect, useState } from "react";
 
 export function SettingsDialog() {
   const open = useApp((s) => s.settingsOpen);
   const settings = useApp((s) => s.settings);
   const patchSettings = useApp((s) => s.patchSettings);
   const setSettingsOpen = useApp((s) => s.setSettingsOpen);
+  const [paths, setPaths] = useState({ userData: "", appName: "", listFile: "" });
+
+  useEffect(() => {
+    if (!open || !isDesktop()) return;
+    const api = desktop();
+    if (!api?.paths) return;
+    void api.paths().then((p) => setPaths(p));
+  }, [open, settings.rootPath]);
 
   if (!open) return null;
 
@@ -38,6 +47,25 @@ export function SettingsDialog() {
               )}
             </div>
           </label>
+          {isDesktop() && (
+            <div className="rounded-md border border-line bg-raised px-3 py-2 text-xs text-muted">
+              <p>清单文件（可打开的 JSON）</p>
+              <p className="mt-1 break-all text-fg">{paths.listFile || `${settings.rootPath || "（先选下载根目录）"}\\.cangxia\\works.json`}</p>
+              <p className="mt-2">程序缓存目录（名字不一定叫藏匣）</p>
+              <p className="mt-1 break-all text-fg">{paths.userData || "打开设置后显示"}{paths.appName ? `（${paths.appName}）` : ""}</p>
+              {paths.listFile ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => void desktop()?.openListFile()}
+                >
+                  打开清单所在文件夹
+                </Button>
+              ) : null}
+            </div>
+          )}
           <label className="block text-sm">
             PushPlus token（选填）
             <input
