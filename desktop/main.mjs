@@ -698,15 +698,15 @@ ipcMain.handle("cangxia:download", async (_e, payload) => {
         url: img.url,
         status: "waiting",
       })),
-      ...((work.videos?.length ? work.videos : work.videoUrl ? [{ id: `${work.id}_v`, url: work.videoUrl }] : []) || []).map(
-        (clip, i) => ({
+      ...((work.videos?.length ? work.videos : work.videoUrl ? [{ id: `${work.id}_v`, url: work.videoUrl }] : []) || [])
+        .filter((clip) => clip?.url && !/\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(clip.url))
+        .map((clip, i) => ({
           key: clip.id || `vid-${i}`,
           name: `视频${i + 1}.mp4`,
           type: "video",
           url: clip.url,
           status: "waiting",
-        }),
-      ),
+        })),
     ];
     const res = await runWork({
       work,

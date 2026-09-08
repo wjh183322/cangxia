@@ -4,12 +4,46 @@ function stripWm(url) {
     .replace(/watermark=1/g, "watermark=0");
 }
 
-function pickUrl(urlList) {
+function isVideoUrl(url) {
+  const u = String(url || "").toLowerCase();
+  if (!/^https?:\/\//.test(u)) return false;
+  if (/\.(jpg|jpeg|png|webp|gif|heic|bmp)(\?|$)/i.test(u)) return false;
+  if (/\.m3u8(\?|$)/i.test(u)) return false;
+  return true;
+}
+
+function pickUrl(urlList, kind = "any") {
   if (!Array.isArray(urlList) || urlList.length === 0) return "";
-  const urls = urlList.filter((u) => typeof u === "string" && u);
+  const urls = urlList.filter((u) => typeof u === "string" && u && (kind !== "video" || isVideoUrl(u)));
   if (!urls.length) return "";
   const clean = urls.find((u) => !/watermark|playwm/i.test(u));
   return stripWm(clean || urls[0]);
+}
+
+function isPlayableRate(rate) {
+  if (!rate || typeof rate !== "object") return false;
+  if (rate.is_h265 === 1 || rate.is_h265 === true || rate.is_bytevc1 === 1 || rate.is_bytevc1 === true) return false;
+  const tag = `${rate.gear_name || ""} ${rate.codec_type || ""} ${rate.format || ""}`;
+  if (/h265|hevc|bytevc1/i.test(tag)) return false;
+  return true;
+}
+
+function videoUrl(video) {
+  if (!video || typeof video !== "object") return "";
+  const rates = Array.isArray(video.bit_rate) ? [...video.bit_rate] : [];
+  const playable = rates.filter(isPlayableRate);
+  const pool = (playable.length ? playable : rates).sort(
+    (a, b) =>
+      (Number(b.bit_rate) || Number(b.data_size) || 0) - (Number(a.bit_rate) || Number(a.data_size) || 0),
+  );
+  for (const rate of pool) {
+    const url = pickUrl(rate?.play_addr?.url_list || rate?.play_addr_h264?.url_list || [], "video");
+    if (url) return url;
+  }
+  return pickUrl(
+    video.play_addr_h264?.url_list || video.play_addr?.url_list || video.download_addr?.url_list || [],
+    "video",
+  );
 }
 
 function imageUrl(img) {
@@ -42,22 +76,6 @@ function coverUrl(video) {
   );
 }
 
-function videoUrl(video) {
-  if (!video || typeof video !== "object") return "";
-  const rates = Array.isArray(video.bit_rate) ? [...video.bit_rate] : [];
-  rates.sort(
-    (a, b) =>
-      (Number(b.bit_rate) || Number(b.data_size) || 0) - (Number(a.bit_rate) || Number(a.data_size) || 0),
-  );
-  for (const rate of rates) {
-    const url = pickUrl(rate?.play_addr?.url_list || rate?.play_addr_h264?.url_list || []);
-    if (url) return url;
-  }
-  return pickUrl(
-    video.play_addr_h264?.url_list || video.play_addr?.url_list || video.download_addr?.url_list || [],
-  );
-}
-
 function hashtagsFrom(aweme) {
   const extra = Array.isArray(aweme.text_extra) ? aweme.text_extra : [];
   const fromExtra = extra.map((x) => x.hashtag_name || x.hashtagName).filter(Boolean);
@@ -78,7 +96,7 @@ function mediaFrom(aweme) {
   for (const [i, img] of posts.entries()) {
     const still = imageUrl(img);
     if (still) images.push({ id: `${id}_${i}`, url: still });
-    const live = videoUrl(img.video) || pickUrl(img.clip?.url_list || []);
+    const live = videoUrl(img.video) || pickUrl(img.clip?.url_list || [], "video");
     if (live) videos.push({ id: `${id}_v${i}`, url: live });
   }
   if (!isNote) {

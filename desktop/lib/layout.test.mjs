@@ -104,6 +104,25 @@ test("mapAweme video keeps still and highest bit_rate", () => {
   assert.equal(work.videoUrl, "https://x/play-hi.mp4");
 });
 
+test("mapAweme video skips h265 for a playable mp4", () => {
+  const work = mapAweme(
+    {
+      aweme_id: "h265",
+      desc: "舞",
+      video: {
+        origin_cover: { url_list: ["https://x/still.jpg"] },
+        bit_rate: [
+          { bit_rate: 8000000, is_h265: 1, play_addr: { url_list: ["https://x/hevc.mp4"] } },
+          { bit_rate: 2000000, is_h265: 0, play_addr: { url_list: ["https://x/avc.mp4"] } },
+        ],
+      },
+      author: { nickname: "山", unique_id: "shan" },
+    },
+    { id: "default", name: "收藏" },
+  );
+  assert.equal(work.videoUrl, "https://x/avc.mp4");
+});
+
 test("writes numbered videos beside stills", async () => {
   const root = await mkdtemp(join(tmpdir(), "cangxia-vid-"));
   try {

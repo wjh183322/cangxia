@@ -25,6 +25,7 @@ export function VideoPlayer({
   const [muted, setMuted] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [broken, setBroken] = useState(false);
 
   useEffect(() => {
     const el = ref.current;
@@ -33,6 +34,7 @@ export function VideoPlayer({
     el.currentTime = 0;
     setPlaying(false);
     setCurrent(0);
+    setBroken(false);
     if (autoPlay) {
       el.muted = muted;
       void el.play();
@@ -81,10 +83,20 @@ export function VideoPlayer({
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
-          onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+          onLoadedMetadata={(e) => {
+            const d = e.currentTarget.duration || 0;
+            setDuration(d);
+            if (!Number.isFinite(d) || d <= 0) setBroken(true);
+          }}
+          onError={() => setBroken(true)}
           onEnded={() => setPlaying(false)}
         />
-        {!playing && (
+        {broken && (
+          <p className="absolute inset-0 flex items-center justify-center bg-bg/80 px-4 text-center text-sm text-muted">
+            这个文件不是可播放的视频，请重新读取后再下载
+          </p>
+        )}
+        {!playing && !broken && (
           <button
             type="button"
             className="absolute inset-0 flex items-center justify-center bg-bg/20"

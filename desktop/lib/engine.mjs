@@ -1,7 +1,7 @@
 import { mkdir, copyFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { exists, readIndex, writeIndex, writeWorkMeta, workDir } from "./layout.mjs";
-import { removePartial, transferToFile } from "./transfer.mjs";
+import { removePartial, sniffFile, transferToFile } from "./transfer.mjs";
 
 let controller = null;
 let abortReason = null;
@@ -34,7 +34,10 @@ export async function runWork({ work, folderName, files, rootPath, session, send
     if (await exists(dest)) {
       try {
         const st = await stat(dest);
-        if (st.size > 32) {
+        const kind = await sniffFile(dest);
+        const videoOk = file.type !== "video" || kind === "mp4" || kind === "webm";
+        const imageOk = file.type !== "image" || (kind !== "empty" && kind !== "html");
+        if (st.size > 32 && videoOk && imageOk) {
           results.set(file.key, "done");
           send("cangxia:dl", { type: "file-done", workId: work.id, fileKey: file.key, received: st.size, total: st.size });
           continue;
@@ -42,6 +45,7 @@ export async function runWork({ work, folderName, files, rootPath, session, send
       } catch {
         /* rewrite */
       }
+      await removePartial(dest);
     }
     lastReceived = 0;
     tickAt = Date.now();
@@ -69,6 +73,13 @@ export async function runWork({ work, folderName, files, rootPath, session, send
           });
         },
       });
+      const kind = await sniffFile(dest);
+      if (file.type === "video" && kind !== "mp4" && kind !== "webm") {
+        throw new Error(`not-video:${kind}`);
+      }
+      if (file.type === "image" && (kind === "empty" || kind === "html")) {
+        throw new Error(`not-image:${kind}`);
+      }
       results.set(file.key, "done");
       send("cangxia:dl", { type: "file-done", workId: work.id, fileKey: file.key });
     } catch {
