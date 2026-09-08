@@ -7,7 +7,7 @@ import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
 import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
-import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT } from "./lib/page-api.mjs";
+import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -44,6 +44,13 @@ let readingInside = false;
 let lastHarvestMethod = "";
 let lastHarvestCount = 0;
 let lastHarvestError = "";
+let netTrace = [];
+
+function traceNet(url, tag) {
+  const short = String(url || "").replace(/^https:\/\/www\.douyin\.com/i, "").slice(0, 72);
+  netTrace.push(`${tag}:${short}`);
+  if (netTrace.length > 16) netTrace.shift();
+}
 let feedBuffer = [];
 let readChoiceResolve = null;
 let loginWaiting = false;
@@ -228,6 +235,7 @@ async function attachNetwork(win) {
       if (mime.includes("html") || mime.includes("image") || mime.includes("video") || mime.includes("font")) return;
       if (!/aweme|collect|favorite|sns/i.test(url)) return;
       pending.set(params.requestId, url);
+      traceNet(url, "net");
       return;
     }
     if (method === "Network.loadingFailed") {
@@ -242,7 +250,10 @@ async function attachNetwork(win) {
       const body = await wc.debugger.sendCommand("Network.getResponseBody", { requestId: params.requestId });
       const raw = body.base64Encoded ? Buffer.from(body.body, "base64").toString("utf8") : body.body;
       const text = String(raw || "").trim();
-      if (!text.startsWith("{") && !text.startsWith("[")) return;
+      if (!text.startsWith("{") && !text.startsWith("[")) {
+        traceNet(url, "notjson");
+        return;
+      }
       ingestPayload(url, JSON.parse(text));
     } catch {
       /* ignore non-json */
@@ -303,7 +314,7 @@ function ingestPayload(url, json) {
   }
   if (!refreshReading) return;
   const isList = /listcollection/i.test(url);
-  const isFolderFeed = /collects\/video\/list|collects\/aweme\/list|collects\/item\/list/i.test(url);
+  const isFolderFeed = /collects\/video\/list|collects\/aweme\/list|collects\/item\/list|\/web\/collects\//i.test(url) && !/collects\/list\/?(?:\?|$)/i.test(url);
   if (readingPattern === "listcollection" ? !isList : !isFolderFeed) return;
   const root = json.data || json;
   const collectsMatch = String(url).match(/collects_id=(\d+)/);
@@ -319,7 +330,7 @@ function ingestPayload(url, json) {
     }
     if (!readingCollectsId && feedId) readingCollectsId = feedId;
     if (readingCollectsId && feedId && feedId !== readingCollectsId) return;
-    if (!feedId) return;
+    // 进夹后即使 URL 没带 collects_id 也收下（POST body 常不在 query 里）
   }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
@@ -434,6 +445,25 @@ function countProgress(folderId, folderName, started) {
   if (folderName === "收藏") return Math.max(0, captured.size - started);
   if (folderId) return Math.max(0, countInFolder(folderId) - started);
   return Math.max(0, captured.size - started);
+}
+
+async function drainPageFeeds(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const feeds = await win.webContents.executeJavaScript(DRAIN_PAGE_FEEDS_SCRIPT);
+    for (const f of feeds || []) {
+      let json = null;
+      try {
+        json = JSON.parse(f.text);
+      } catch {
+        json = null;
+      }
+      if (json) ingestPayload(f.url, json);
+      traceNet(f.url, json ? "page" : "page-raw");
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 async function waitForNewItems(prevCount, timeoutMs, folderName, folderId, started, max) {
@@ -633,6 +663,11 @@ async function waitPageReady(win) {
     message: "等待抖音页面和接口签名（你不用点收藏夹）",
   });
   try {
+    await win.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT);
+  } catch {
+    /* ignore */
+  }
+  try {
     await win.webContents.executeJavaScript(NUDGE_MOUSE_SCRIPT);
   } catch {
     /* ignore */
@@ -711,9 +746,19 @@ async function harvestMcp(win, ctx) {
       /* ignore */
     }
     replayFolderBuffer();
+    await drainPageFeeds(win);
   }
   const got = await harvestByIntercept(win, ctx);
-  if (!got) noteHarvest(`拦包0条${readingCollectsId ? `#${readingCollectsId}` : ""}`);
+  if (!got) {
+    let res = [];
+    try {
+      res = await win.webContents.executeJavaScript(LIST_COLLECT_URLS_SCRIPT);
+    } catch {
+      res = [];
+    }
+    const hint = (res || []).map((u) => String(u).split("?")[0].slice(-28)).join(",") || "无资源";
+    noteHarvest(`拦包0条 ${(netTrace.slice(-2).join("|") || "无net")} ${hint}`.slice(0, 48));
+  }
   return got;
 }
 
@@ -860,6 +905,7 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
     total: max,
     message: `正在读取「${folderName}」 0/${max}`,
   });
+  await drainPageFeeds(win);
   await waitForNewItems(captured.size, 8000, folderName, folderId, started, max);
   if (countProgress(folderId, folderName, started) >= max) return countProgress(folderId, folderName, started);
   let idle = 0;
@@ -876,8 +922,11 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
     if (got >= max) break;
     if (!readingHasMore && got > 0) break;
     const before = captured.size;
+    await drainPageFeeds(win);
     await wheelBurst(win);
+    await drainPageFeeds(win);
     const grew = await waitForNewItems(before, 4000, folderName, folderId, started, max);
+    await drainPageFeeds(win);
     if (countProgress(folderId, folderName, started) >= max) break;
     if (grew) idle = 0;
     else idle += 1;
@@ -956,6 +1005,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   refreshReading = true;
   lastHarvestMethod = "";
   lastHarvestCount = 0;
+  netTrace = [];
   const ctx = { folderId, folderName, max, started, label: "" };
   const steps = [["拦页面", () => harvestMcp(win, ctx)]];
   const tried = [];
@@ -1193,6 +1243,7 @@ function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false, 
   });
   douyinWindow.webContents.on("did-finish-load", () => {
     if (!loginWaiting) {
+      void douyinWindow.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT).catch(() => {});
       void douyinWindow.webContents.executeJavaScript(installFolderWatchScript(folders.map((f) => f.name))).catch(() => {});
     }
   });
@@ -1336,6 +1387,7 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   const max = Math.max(1, Number(settings.maxPerRefresh) || 300);
   const folderName = String(opts.folderName || "收藏").trim() || "收藏";
   const win = openDouyinWindow("https://www.douyin.com/user/self?showTab=favorite", { forRefresh: true });
+  void attachNetwork(win);
   openProgressWindow();
   send("cangxia:progress", {
     active: true,

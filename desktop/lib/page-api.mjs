@@ -52,6 +52,55 @@ export const PAGE_TOKENS_SCRIPT = `(() => {
   };
 })()`;
 
+export const HOOK_PAGE_FEEDS_SCRIPT = `(() => {
+  if (window.__cxFetchHook) return "already";
+  window.__cxFetchHook = true;
+  window.__cxFeeds = [];
+  const push = (url, text) => {
+    const u = String(url || "");
+    if (!/collect|favorite|listcollection/i.test(u)) return;
+    window.__cxFeeds.push({ url: u, text: String(text || "").slice(0, 800000) });
+    if (window.__cxFeeds.length > 30) window.__cxFeeds.shift();
+  };
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async function (...args) {
+    const res = await origFetch(...args);
+    try {
+      const url = String((args[0] && args[0].url) || args[0] || "");
+      const clone = res.clone();
+      push(url, await clone.text());
+    } catch {}
+    return res;
+  };
+  const open = XMLHttpRequest.prototype.open;
+  const send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+    this.__cxUrl = url;
+    return open.call(this, method, url, ...rest);
+  };
+  XMLHttpRequest.prototype.send = function (...args) {
+    this.addEventListener("load", () => {
+      try { push(this.__cxUrl, this.responseText); } catch {}
+    });
+    return send.apply(this, args);
+  };
+  return "hooked";
+})()`;
+
+export const DRAIN_PAGE_FEEDS_SCRIPT = `(() => {
+  const out = window.__cxFeeds || [];
+  window.__cxFeeds = [];
+  return out.map((x) => ({ url: String(x.url || ""), text: String(x.text || "") }));
+})()`;
+
+export const LIST_COLLECT_URLS_SCRIPT = `(() => {
+  try {
+    return performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /collect/i.test(n)).slice(-8);
+  } catch {
+    return [];
+  }
+})()`;
+
 export function waitBdmsScript() {
   return `(() => new Promise((resolve) => {
     const t0 = Date.now();
