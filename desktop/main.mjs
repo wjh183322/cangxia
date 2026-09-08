@@ -382,10 +382,12 @@ function ingestPayload(url, json) {
       work.alsoInFolderIds = [...new Set([...(work.alsoInFolderIds || []), "default"])];
     }
     const prev = captured.get(work.id);
-    work.listIndex = readingOrder;
     if (reading === "收藏") work.allIndex = readingOrder;
+    else work.listIndex = readingOrder;
     readingOrder += 1;
     if (prev) {
+      if (work.allIndex == null && prev.allIndex != null) work.allIndex = prev.allIndex;
+      if (work.listIndex == null && prev.listIndex != null) work.listIndex = prev.listIndex;
       const keepCustom = prev.folderId && prev.folderId !== "default" && reading === "收藏";
       if (keepCustom) {
         work.folderId = prev.folderId;
@@ -416,10 +418,14 @@ function replayFolderBuffer() {
 async function snapshotWorks() {
   const works = [...captured.values()].map((w) => {
     if (seenThisRead.size && !seenThisRead.has(w.id)) {
+      if (readingFolderName === "收藏") return { ...w, allIndex: (w.allIndex ?? 0) + 1_000_000 };
       return { ...w, listIndex: (w.listIndex ?? 0) + 1_000_000 };
     }
     return w;
-  }).sort((a, b) => (a.listIndex ?? 0) - (b.listIndex ?? 0));
+  }).sort((a, b) => {
+    if (readingFolderName === "收藏") return (a.allIndex ?? 1e12) - (b.allIndex ?? 1e12);
+    return (a.listIndex ?? 1e12) - (b.listIndex ?? 1e12);
+  });
   if (settings.rootPath) {
     const index = await readIndex(settings.rootPath);
     const downloaded = new Set((index.records || []).map((r) => r.id));

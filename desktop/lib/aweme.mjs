@@ -161,7 +161,6 @@ export function mapAweme(aweme, folder) {
     videoUrl: videos[0]?.url,
     videos,
     collectedAt: (Number(aweme._collect_time || aweme.collects_time || aweme.collect_time) || 0) * 1000 || Date.now(),
-    listIndex: 0,
     images,
     coverUrl: images[0]?.url || "",
   };

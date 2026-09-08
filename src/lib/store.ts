@@ -157,9 +157,11 @@ export { inFolder };
 
 export function listWorks(works: Work[], folderId: string, kind: KindFilter, hiddenIds: string[] = []) {
   const hidden = new Set(hiddenIds);
+  const rank = (w: Work) =>
+    folderId === "default" || folderId === "all" ? (w.allIndex ?? 1e12) : (w.listIndex ?? 1e12);
   return works
     .filter((w) => !hidden.has(w.id) && inFolder(w, folderId) && matchesKind(w, kind))
-    .sort((a, b) => (a.listIndex ?? 1e12) - (b.listIndex ?? 1e12) || b.collectedAt - a.collectedAt);
+    .sort((a, b) => rank(a) - rank(b) || b.collectedAt - a.collectedAt);
 }
 
 export const useApp = create<AppState>()(
@@ -728,7 +730,8 @@ async function wait(ms: number) {
 
 function mergeIncoming(existing: Work[], incoming: Work[]) {
   const incomingIds = new Set(incoming.map((w) => w.id));
-  const touchedFolders = new Set(incoming.map((w) => w.folderId));
+  const harvestedAll = incoming.some((w) => w.allIndex != null);
+  const harvestedFolders = new Set(incoming.map((w) => w.folderId).filter((id) => id && id !== "default"));
   const byId = new Map(existing.map((w) => [w.id, w]));
   for (const w of incoming) {
     const prev = byId.get(w.id);
@@ -736,21 +739,36 @@ function mergeIncoming(existing: Work[], incoming: Work[]) {
       byId.set(w.id, w);
       continue;
     }
+    const folderId = prev.folderId && prev.folderId !== "default" ? prev.folderId : w.folderId;
     byId.set(w.id, {
       ...w,
+      folderId,
       userTags: prev.userTags,
       status: prev.status === "downloaded" || prev.status === "stale" ? prev.status : w.status,
       videoStatus: videoStatusOf(prev) === "saved" ? "saved" : w.videoStatus ?? videoStatusOf(prev),
-      alsoInFolderIds: [...new Set([...(prev.alsoInFolderIds || []), ...w.alsoInFolderIds])],
+      alsoInFolderIds: [...new Set([...(prev.alsoInFolderIds || []), ...(w.alsoInFolderIds || []), prev.folderId, w.folderId].filter((id) => id && id !== folderId))],
       listIndex: w.listIndex ?? prev.listIndex,
       allIndex: w.allIndex ?? prev.allIndex,
     });
   }
   for (const prev of existing) {
-    if (incomingIds.has(prev.id) || !touchedFolders.has(prev.folderId)) continue;
+    if (incomingIds.has(prev.id)) continue;
+    let listIndex = prev.listIndex;
+    let allIndex = prev.allIndex;
+    let changed = false;
+    if (harvestedAll && prev.allIndex != null) {
+      allIndex = prev.allIndex + 1_000_000;
+      changed = true;
+    }
+    if (harvestedFolders.has(prev.folderId)) {
+      listIndex = (prev.listIndex ?? 0) + 1_000_000;
+      changed = true;
+    }
+    if (!changed) continue;
     const cur = byId.get(prev.id);
     if (!cur) continue;
-    byId.set(prev.id, { ...cur, listIndex: (cur.listIndex ?? 0) + 1_000_000 });
+    const next = prev.status === "downloaded" ? { ...cur, status: "stale" as const } : cur;
+    byId.set(prev.id, { ...next, listIndex, allIndex });
   }
   return [...byId.values()];
 }
