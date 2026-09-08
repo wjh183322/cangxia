@@ -682,13 +682,34 @@ function noteHarvest(err) {
   lastHarvestError = String(err || "").replace(/\s+/g, " ").slice(0, 96);
 }
 
-async function waitPageReady(win) {
+async function currentHref(win) {
+  try {
+    return String(await win.webContents.executeJavaScript("location.href") || "");
+  } catch {
+    return "";
+  }
+}
+
+async function waitPageReady(win, folderName = "收藏") {
+  const target =
+    folderName === "收藏"
+      ? "https://www.douyin.com/user/self?showTab=favorite"
+      : "https://www.douyin.com/user/self?showTab=favorite_collection";
   send("cangxia:progress", {
     active: true,
     current: 0,
     total: 1,
-    message: "等待抖音页面和接口签名（你不用点收藏夹）",
+    message: folderName === "收藏" ? "打开总收藏页" : "打开收藏夹列表页（不点首页收藏）",
   });
+  let href = await currentHref(win);
+  const need =
+    folderName === "收藏"
+      ? !/showTab=favorite(?!_collection)/i.test(href) && !/showTab=favorite(&|$)/i.test(href)
+      : !/favorite_collection/i.test(href);
+  if (!/\/user\/self/i.test(href) || need) {
+    await win.loadURL(target, { userAgent: CHROME_UA });
+    await sleep(2800);
+  }
   try {
     await win.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT);
   } catch {
@@ -700,22 +721,17 @@ async function waitPageReady(win) {
     /* ignore */
   }
   try {
-    const ready = await win.webContents.executeJavaScript(waitBdmsScript());
-    send("cangxia:progress", {
-      active: true,
-      current: 0,
-      total: 1,
-      message: ready?.bdms ? "签名已就绪，开始读接口" : "签名未就绪，仍尝试读接口",
-    });
+    await win.webContents.executeJavaScript(waitBdmsScript());
   } catch {
     /* continue */
   }
-  try {
-    await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-  } catch {
-    /* ignore */
-  }
-  await sleep(1600);
+  href = await currentHref(win);
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: 1,
+    message: `页面 ${href.replace("https://www.douyin.com", "").slice(0, 48) || "未知"}`,
+  });
 }
 
 async function harvestMcp(win, ctx) {
@@ -726,23 +742,21 @@ async function harvestMcp(win, ctx) {
       total: ctx.max || 1,
       message: `${ctx.label || "拦包"} 打开收藏夹列表，再点进「${ctx.folderName}」`,
     });
-    let tab = "none";
-    for (let i = 0; i < 4; i += 1) {
-      try {
-        tab = await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
-      } catch {
-        tab = "none";
+    let tab = "url";
+    const href = await currentHref(win);
+    if (!/favorite_collection/i.test(href)) {
+      tab = "none";
+      for (let i = 0; i < 4; i += 1) {
+        try {
+          tab = await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+        } catch {
+          tab = "none";
+        }
+        if (String(tab).startsWith("clicked")) break;
+        await sleep(700);
       }
-      if (String(tab).startsWith("clicked")) break;
-      await sleep(700);
+      await sleep(String(tab).startsWith("clicked") ? 2800 : 800);
     }
-    send("cangxia:progress", {
-      active: true,
-      current: 0,
-      total: ctx.max || 1,
-      message: String(tab).startsWith("clicked") ? `已打开收藏夹列表（${tab}），正在点进目标夹` : "没找到「收藏夹」按钮，改点左侧夹名",
-    });
-    await sleep(String(tab).startsWith("clicked") ? 3200 : 1200);
     readingCollectsId = "";
     readingInside = false;
     feedBuffer = [];
@@ -756,7 +770,7 @@ async function harvestMcp(win, ctx) {
       }
       const side = (probe?.side || []).join("/") || "无";
       const cards = (probe?.cards || []).map((c) => c.name || c).join("/") || "无";
-      noteHarvest(`没点进夹 tab=${tab} 侧栏:${side} 卡片:${cards}`.slice(0, 48));
+      noteHarvest(`没点进夹 tab=${tab} 侧栏:${side} 卡片:${cards}`.slice(0, 90));
       send("cangxia:progress", {
         active: true,
         current: 0,
@@ -783,7 +797,9 @@ async function harvestMcp(win, ctx) {
     } catch {
       res = [];
     }
-    noteHarvest(`拦包0条 ${(netTrace.slice(-3).join("|") || "无net")}`.slice(0, 90));
+    const collectish = netTrace.filter((t) => /collect|listcollection|favorite/i.test(t));
+    const used = (collectish.length ? collectish : netTrace).slice(-3);
+    noteHarvest(`拦包0条 ${(used.join("|") || "无net")}`.slice(0, 90));
   }
   return got;
 }
@@ -1049,7 +1065,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     return n;
   };
   try {
-    await waitPageReady(win);
+    await waitPageReady(win, folderName);
     for (let i = 0; i < steps.length; i += 1) {
       const [label, run] = steps[i];
       if (refreshStop || !win || win.isDestroyed()) {
@@ -1412,7 +1428,11 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   refreshReading = false;
   const max = Math.max(1, Number(settings.maxPerRefresh) || 300);
   const folderName = String(opts.folderName || "收藏").trim() || "收藏";
-  const win = openDouyinWindow("https://www.douyin.com/user/self?showTab=favorite", { forRefresh: true });
+  const startUrl =
+    folderName === "收藏"
+      ? "https://www.douyin.com/user/self?showTab=favorite"
+      : "https://www.douyin.com/user/self?showTab=favorite_collection";
+  const win = openDouyinWindow(startUrl, { forRefresh: true });
   void attachNetwork(win);
   openProgressWindow();
   send("cangxia:progress", {
