@@ -64,6 +64,25 @@ export function signUrlScript(method, url) {
   })()`;
 }
 
+export function hookedXhrScript({ method = "GET", url, body = null }) {
+  return `(() => new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.withCredentials = true;
+    xhr.open(${JSON.stringify(method)}, ${JSON.stringify(url)}, true);
+    xhr.setRequestHeader("Accept", "application/json, text/plain, */*");
+    ${method === "POST" ? 'xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");' : ""}
+    xhr.timeout = 18000;
+    xhr.onload = () => {
+      let json = null;
+      try { json = JSON.parse(xhr.responseText); } catch {}
+      resolve({ status: xhr.status, json, text: String(xhr.responseText || "").slice(0, 220) });
+    };
+    xhr.onerror = () => resolve({ status: 0, json: null, text: "xhr-error" });
+    xhr.ontimeout = () => resolve({ status: 0, json: null, text: "timeout" });
+    xhr.send(${body == null ? "null" : JSON.stringify(String(body))});
+  }))()`;
+}
+
 export function pageFetchScript({ method = "GET", url, body = null }) {
   return `(() => fetch(${JSON.stringify(url)}, {
     method: ${JSON.stringify(method)},

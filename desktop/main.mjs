@@ -7,7 +7,7 @@ import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
 import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT } from "./lib/login-page.mjs";
-import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript } from "./lib/page-api.mjs";
+import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -554,6 +554,38 @@ async function signedRequest(win, { method = "GET", path, query = {}, body = nul
   return res;
 }
 
+async function hookedRequest(win, { method = "GET", path, query = {}, body = null }) {
+  const msToken = await sessionMsToken();
+  const qs = new URLSearchParams(commonQuery({ ...query, ...(msToken ? { msToken } : {}) })).toString();
+  const pathOnly = String(path).replace(/^https?:\/\/www\.douyin\.com/, "");
+  const url = `${pathOnly}?${qs}`;
+  try {
+    return await win.webContents.executeJavaScript(hookedXhrScript({ method, url, body }), true);
+  } catch (err) {
+    return { status: 0, json: null, text: String(err?.message || err) };
+  }
+}
+
+async function netCookieRequest(win, { method = "GET", path, query = {}, body = null }) {
+  const msToken = await sessionMsToken();
+  const qs = new URLSearchParams(commonQuery({ ...query, ...(msToken ? { msToken } : {}) })).toString();
+  return sessionRequest(method, `${path}?${qs}`, body);
+}
+
+async function harvestMcp(win, ctx) {
+  if (ctx.folderName === "收藏") {
+    await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+    await sleep(2500);
+  } else {
+    await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+    await sleep(2000);
+    await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+    await sleep(3500);
+    readingCollectsId = folderIdByName(ctx.folderName);
+  }
+  return harvestByIntercept(win, ctx);
+}
+
 function jsonOk(json) {
   if (!json || typeof json !== "object") return false;
   const code = json.status_code;
@@ -561,7 +593,7 @@ function jsonOk(json) {
   return true;
 }
 
-async function harvestByApi(win, { folderId, folderName, max, started }) {
+async function harvestVia(win, { folderId, folderName, max, started }, doRequest) {
   readingInside = true;
   refreshReading = true;
   try {
@@ -588,14 +620,14 @@ async function harvestByApi(win, { folderId, folderName, max, started }) {
         message: `接口读取「收藏」 ${countProgress(folderId, folderName, started)}/${max}`,
       });
       const body = `cursor=${cursor}&count=10`;
-      let res = await signedRequest(win, {
+      let res = await doRequest(win, {
         method: "POST",
         path: "https://www.douyin.com/aweme/v1/web/aweme/listcollection/",
         query: { count: "10", cursor: String(cursor) },
         body,
       });
       if (!jsonOk(res.json) || !collectAwemes(res.json).length) {
-        res = await signedRequest(win, {
+        res = await doRequest(win, {
           method: "GET",
           path: "https://www.douyin.com/aweme/v1/web/aweme/listcollection/",
           query: { count: "10", cursor: String(cursor) },
@@ -626,7 +658,7 @@ async function harvestByApi(win, { folderId, folderName, max, started }) {
     total: max,
     message: `接口列出收藏夹，定位「${folderName}」`,
   });
-  const listRes = await signedRequest(win, {
+  const listRes = await doRequest(win, {
     method: "GET",
     path: "https://www.douyin.com/aweme/v1/web/collects/list/",
     query: { cursor: "0", count: "40" },
@@ -658,7 +690,7 @@ async function harvestByApi(win, { folderId, folderName, max, started }) {
       message: `接口读取「${folderName}」 ${countProgress(folderId, folderName, started)}/${max}`,
     });
     const url = `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`;
-    const res = await signedRequest(win, {
+    const res = await doRequest(win, {
       method: "GET",
       path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
       query: { collects_id: id, cursor: String(cursor), count: "10" },
@@ -779,46 +811,41 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   readingInside = true;
   feedBuffer = [];
   refreshReading = true;
+  const ctx = { folderId, folderName, max, started };
+  const steps = [
+    ["1/5 f2 页面XHR", () => harvestVia(win, ctx, hookedRequest)],
+    ["2/5 TikTokDownloader 签名", () => harvestVia(win, ctx, signedRequest)],
+    ["3/5 douyin-downloader cookie", () => harvestVia(win, ctx, netCookieRequest)],
+    ["4/5 LightJUNction 再试XHR", () => harvestVia(win, ctx, hookedRequest)],
+    ["5/5 MCP 拦页面", () => harvestMcp(win, ctx)],
+  ];
   try {
     await openFavoriteFresh(win);
-    if (folderName === "收藏") {
-      await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-      await sleep(2500);
-      const got = await harvestByIntercept(win, { folderId, folderName, max, started });
+    for (const [label, run] of steps) {
+      if (refreshStop || !win || win.isDestroyed()) return;
       send("cangxia:progress", {
         active: true,
-        current: Math.min(got, max),
+        current: countProgress(folderId, folderName, started),
         total: max,
-        message: got > 0 ? `已读「收藏」 ${got}/${max}` : "总收藏没读到，请确认已登录后再试",
+        message: `尝试 ${label} 读「${folderName}」`,
       });
-      return;
-    }
-    const viaApi = await harvestByApi(win, { folderId, folderName, max, started });
-    if (viaApi > 0) {
-      send("cangxia:progress", {
-        active: true,
-        current: Math.min(viaApi, max),
-        total: max,
-        message: `接口读完「${folderName}」 ${viaApi}/${max}`,
-      });
-      return;
+      const got = await run();
+      if (got > 0) {
+        send("cangxia:progress", {
+          active: true,
+          current: Math.min(got, max),
+          total: max,
+          message: `${label} 读到 ${got} 条`,
+        });
+        return;
+      }
     }
     send("cangxia:progress", {
       active: true,
       current: 0,
       total: max,
-      message: `接口没读到「${folderName}」，改点收藏夹页拿列表`,
+      message: `五种方法都没读到「${folderName}」`,
     });
-    await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
-    await sleep(2000);
-    await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
-    await sleep(3500);
-    readingCollectsId = folderIdByName(folderName);
-    if (readingCollectsId) {
-      const again = await harvestByApi(win, { folderId, folderName, max, started });
-      if (again > 0) return;
-    }
-    await harvestByIntercept(win, { folderId, folderName, max, started });
   } catch (err) {
     send("cangxia:progress", {
       active: true,
