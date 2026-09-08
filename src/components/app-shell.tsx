@@ -130,21 +130,6 @@ export function AppShell() {
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         {(tab === "collect" || tab === "library") && (
           <aside className="flex gap-2 overflow-x-auto border-b border-line p-3 md:w-52 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
-            {tab === "library" && (
-              <button
-                type="button"
-                onClick={() => setLibraryFolder("all")}
-                className={`flex min-h-11 shrink-0 items-center gap-2 rounded-md px-3 text-left text-sm ${
-                  libraryFolderId === "all" ? "bg-raised text-fg" : "text-muted hover:bg-raised/60"
-                }`}
-              >
-                <FolderClosed className="size-4 shrink-0" />
-                <span className="truncate">全部</span>
-                <span className="ml-auto tabular-nums text-xs text-subtle">
-                  {works.filter((w) => w.status === "downloaded" || w.status === "stale").length}
-                </span>
-              </button>
-            )}
             {folders
               .filter((folder) => folder.isDefault || chosenFolderIds.includes(folder.id) || chosenFolderIds.includes(folder.name))
               .map((folder) => {

@@ -57,7 +57,7 @@ export function LibraryView() {
   const downloaded = works.filter((w) => {
     if (!(w.status === "downloaded" || w.status === "stale")) return false;
     if (!matchesKind(w, kind)) return false;
-    if (libraryFolderId !== "all" && !inFolder(w, libraryFolderId)) return false;
+    if (libraryFolderId && libraryFolderId !== "all" && !inFolder(w, libraryFolderId)) return false;
     return true;
   });
   const topicOptions = useMemo(() => tagOptions(downloaded, "hashtags"), [downloaded]);

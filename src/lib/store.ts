@@ -182,7 +182,7 @@ export const useApp = create<AppState>()(
       works: liveDesktop() ? [] : WORKS,
       tab: "collect",
       folderId: "default",
-      libraryFolderId: "all",
+      libraryFolderId: "default",
       kind: "album",
       selectedIds: [],
       rangeFrom: "1",
@@ -299,7 +299,7 @@ export const useApp = create<AppState>()(
           deleteIds: [],
         }),
       setFolder: (folderId) => set({ folderId, selectedIds: [] }),
-      setLibraryFolder: (libraryFolderId) => set({ libraryFolderId, tidyIds: [] }),
+      setLibraryFolder: (libraryFolderId) => set({ libraryFolderId: libraryFolderId === "all" ? "default" : libraryFolderId, tidyIds: [] }),
       setKind: (kind) => set({ kind, selectedIds: [], browseMediaIndex: 0, tidyIds: [] }),
       toggleSelect: (id) =>
         set((s) => ({
@@ -685,8 +685,10 @@ export const useApp = create<AppState>()(
           : "default";
         const libraryFolderId =
           get().libraryFolderId === "all" || get().libraryFolderId === "default" || chosenFolderIds.includes(get().libraryFolderId)
-            ? get().libraryFolderId
-            : "all";
+            ? get().libraryFolderId === "all"
+              ? "default"
+              : get().libraryFolderId
+            : "default";
         set({
           folders,
           chosenFolderIds,
@@ -735,7 +737,7 @@ export const useApp = create<AppState>()(
           works,
           folders,
           folderId,
-          libraryFolderId: get().libraryFolderId === id ? "all" : get().libraryFolderId,
+          libraryFolderId: get().libraryFolderId === id ? "default" : get().libraryFolderId,
           hiddenCollectIds: [...new Set([...get().hiddenCollectIds, ...hideIds])],
           deletedFolderIds: [...new Set([...get().deletedFolderIds, id])],
           chosenFolderIds: get().chosenFolderIds.filter((x) => x !== id),
@@ -850,7 +852,7 @@ export const useApp = create<AppState>()(
         state.pendingFolderPick = null;
         state.folderPickChecked = [];
         state.pendingFolderDeleteId = null;
-        if (!state.libraryFolderId) state.libraryFolderId = "all";
+        if (!state.libraryFolderId || state.libraryFolderId === "all") state.libraryFolderId = "default";
         state.loginGate = false;
         state.pendingReadAfterLogin = false;
       },
