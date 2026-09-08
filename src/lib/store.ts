@@ -544,10 +544,17 @@ export const useApp = create<AppState>()(
       applyRefreshResult: (folders, works) => {
         const existing = liveDesktop() ? get().works.filter((w) => !isDemoWork(w)) : get().works;
         const seen = new Set(works.map((w) => w.id));
+        const incomingIds = new Set((folders || []).map((f) => f.id));
         const seenFolders = new Set(works.flatMap((w) => [w.folderId, ...(w.alsoInFolderIds || [])]));
-        const deletedFolderIds = get().deletedFolderIds.filter((id) => !seenFolders.has(id));
-        let nextFolders = folders.length ? folders : get().folders;
-        nextFolders = nextFolders.filter((f) => !deletedFolderIds.includes(f.id));
+        const deletedFolderIds = get().deletedFolderIds.filter((id) => !incomingIds.has(id) && !seenFolders.has(id));
+        const prev = get().folders;
+        const byId = new Map(prev.map((f) => [f.id, f]));
+        for (const f of folders || []) {
+          byId.set(f.id, f);
+          const old = [...byId.values()].find((x) => x.name === f.name && x.id !== f.id && String(x.id).startsWith("folder_"));
+          if (old) byId.delete(old.id);
+        }
+        let nextFolders = [...byId.values()].filter((f) => !deletedFolderIds.includes(f.id));
         if (!nextFolders.some((f) => f.isDefault)) nextFolders = [...emptyFolders(), ...nextFolders];
         if (!nextFolders.length) nextFolders = emptyFolders();
         const folderId = nextFolders.some((f) => f.id === get().folderId) ? get().folderId : nextFolders[0].id;

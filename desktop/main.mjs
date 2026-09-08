@@ -734,6 +734,36 @@ async function waitPageReady(win, folderName = "收藏") {
   });
 }
 
+async function harvestFolderNames(win) {
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: 1,
+    message: "正在读取自建收藏夹名单",
+  });
+  const href = await currentHref(win);
+  if (!/favorite_collection/i.test(href)) {
+    await win.loadURL("https://www.douyin.com/user/self?showTab=favorite_collection", { userAgent: CHROME_UA });
+    await sleep(3500);
+  }
+  try {
+    await win.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT);
+  } catch {
+    /* ignore */
+  }
+  await drainPageFeeds(win);
+  await sleep(1600);
+  await drainPageFeeds(win);
+  const names = folders.filter((f) => !f.isDefault).map((f) => f.name);
+  send("cangxia:progress", {
+    active: true,
+    current: names.length,
+    total: Math.max(1, names.length),
+    message: names.length ? `已识别收藏夹：${names.join("、")}` : "收藏夹名单还没出来，仍保留左侧已有夹",
+  });
+  await sleep(800);
+}
+
 async function harvestMcp(win, ctx) {
   if (ctx.folderName !== "收藏") {
     send("cangxia:progress", {
@@ -788,6 +818,10 @@ async function harvestMcp(win, ctx) {
     }
     replayFolderBuffer();
     await drainPageFeeds(win);
+  } else {
+    const gotFav = await harvestByIntercept(win, ctx);
+    await harvestFolderNames(win);
+    return gotFav;
   }
   const got = await harvestByIntercept(win, ctx);
   if (!got) {
