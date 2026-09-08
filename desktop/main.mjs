@@ -6,7 +6,7 @@ import { collectAwemes, mapAweme, mapFolder } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, isHttpUrl } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, SCROLL_FEED_SCRIPT, isHttpUrl } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -193,9 +193,10 @@ async function completeRefresh() {
 }
 
 async function runRefreshLoop(win, max) {
-  await sleep(1800);
+  await sleep(800);
   let last = 0;
   let idle = 0;
+  let favTries = 0;
   while (win && !win.isDestroyed() && !refreshStop) {
     while (refreshPaused && !refreshStop) await sleep(400);
     if (refreshStop || !win || win.isDestroyed()) break;
@@ -204,21 +205,28 @@ async function runRefreshLoop(win, max) {
       active: true,
       current: Math.min(n, max),
       total: max,
-      message: `正在读取收藏 ${n}/${max}`,
+      message: n === 0 ? "正在打开「收藏」页…" : `正在读取收藏 ${n}/${max}`,
     });
     if (n >= max) break;
     try {
-      await win.webContents.executeJavaScript(
-        "window.scrollTo(0, document.documentElement.scrollHeight)",
-      );
+      const tab = await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+      if (n === 0 && tab !== "already") {
+        favTries += 1;
+        if (favTries <= 12) {
+          await sleep(1100);
+          continue;
+        }
+      }
+      await win.webContents.executeJavaScript(SCROLL_FEED_SCRIPT);
     } catch {
       break;
     }
-    await sleep(1200);
+    await sleep(1400);
     if (captured.size === last) idle += 1;
     else idle = 0;
     last = captured.size;
-    if (idle >= 4) break;
+    if (last > 0 && idle >= 5) break;
+    if (last === 0 && idle >= 10) break;
   }
   await completeRefresh();
 }
@@ -252,6 +260,12 @@ function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false }
   douyinWindow.webContents.on("dom-ready", () => {
     if (loginWaiting || assistQr) {
       void douyinWindow.webContents.executeJavaScript(LOGIN_PAGE_SCRIPT).catch(() => {});
+    }
+  });
+  douyinWindow.webContents.on("did-finish-load", () => {
+    const url = douyinWindow.webContents.getURL();
+    if (!loginWaiting && /user\/self|showTab=favorite/.test(url)) {
+      void douyinWindow.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT).catch(() => {});
     }
   });
   void douyinWindow.loadURL(path, { userAgent: CHROME_UA });

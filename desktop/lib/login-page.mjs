@@ -170,3 +170,40 @@ export const EXTRACT_QR_SCRIPT = `(() => {
   return null;
 })()`;
 
+export const OPEN_FAVORITE_SCRIPT = `(() => {
+  const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
+  const vis = (el) => {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 8 && r.height > 8 && r.top > 70 && r.top < 520;
+  };
+  const nodes = [...document.querySelectorAll("span, div, a, button, p, li")];
+  if (nodes.some((el) => vis(el) && textOf(el) === "收藏夹")) return "already";
+  const fav = nodes.find((el) => {
+    if (!vis(el) || el.childElementCount > 5) return false;
+    const t = textOf(el);
+    return t === "收藏";
+  });
+  if (fav) {
+    const target = fav.closest("a, button, [role='tab']") || fav;
+    target.click();
+    return "clicked";
+  }
+  return "none";
+})()`;
+
+export const SCROLL_FEED_SCRIPT = `(() => {
+  const boxes = [...document.querySelectorAll("div")].filter((el) => {
+    const st = getComputedStyle(el);
+    return (st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") && el.scrollHeight > el.clientHeight + 80;
+  });
+  boxes.sort((a, b) => b.clientHeight - a.clientHeight);
+  const box = boxes[0];
+  if (box) {
+    box.scrollTop = box.scrollHeight;
+    return "box";
+  }
+  window.scrollTo(0, document.documentElement.scrollHeight);
+  document.documentElement.scrollTop = document.documentElement.scrollHeight;
+  return "window";
+})()`;

@@ -1,7 +1,7 @@
 {
   "name": "cangxia-desktop",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "藏匣 Windows 本机程序",
   "main": "main.mjs",
   "type": "module",
