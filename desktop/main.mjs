@@ -312,8 +312,7 @@ function ingestPayload(url, json) {
     if (feedBuffer.length > 24) feedBuffer.shift();
     return;
   }
-  if (isFolderFeed) {
-    if (readingCollectsId && feedId && feedId !== readingCollectsId) return;
+  if (isFolderFeed && readingInside) {
     if (!readingCollectsId && feedId) readingCollectsId = feedId;
   }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
@@ -335,10 +334,6 @@ function ingestPayload(url, json) {
       reading !== "收藏"
         ? ensureFolder(reading, readingCollectsId || custom?.id)
         : custom || defaultFolder();
-    if (reading !== "收藏" && readingCollectsId) {
-      const aid = String(inner.collects_id || feedId || "");
-      if (aid && aid !== readingCollectsId) continue;
-    }
     const work = mapAweme(aweme, folder);
     if (!work.id) continue;
     if (folder && !folder.isDefault) {
@@ -619,6 +614,9 @@ async function harvestMcp(win, ctx) {
       total: ctx.max || 1,
       message: `${ctx.label || "5/5"} 点进「${ctx.folderName}」，不要停在卡片墙`,
     });
+    readingCollectsId = "";
+    readingInside = false;
+    feedBuffer = [];
     const how = await openNamedFolder(win, ctx.folderName, { skipNav: true });
     if (how === "none") {
       send("cangxia:progress", {
@@ -630,6 +628,12 @@ async function harvestMcp(win, ctx) {
       return 0;
     }
     readingInside = true;
+    try {
+      const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
+      if (pageId) readingCollectsId = String(pageId);
+    } catch {
+      /* ignore */
+    }
     replayFolderBuffer();
   }
   return harvestByIntercept(win, ctx);
@@ -808,8 +812,8 @@ async function openNamedFolder(win, folderName, { skipNav = false } = {}) {
     total: 1,
     message: readingCollectsId ? `已对准「${folderName}」，正在点进` : `正在点进「${folderName}」`,
   });
-  await sleep(1000);
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  await sleep(600);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     if (refreshStop || !win || win.isDestroyed()) return "none";
     let inside = { ok: false };
     try {
@@ -818,28 +822,26 @@ async function openNamedFolder(win, folderName, { skipNav = false } = {}) {
       inside = { ok: false };
     }
     if (inside?.ok) return "in";
+    let clicked = "none";
+    try {
+      clicked = await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
+    } catch {
+      clicked = "none";
+    }
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: 1,
+      message: `正在点进「${folderName}」${clicked && clicked !== "none" ? `（${clicked}）` : ""}`,
+    });
     let loc = { how: "none", x: 0, y: 0 };
     try {
       loc = await win.webContents.executeJavaScript(locateFolderCardScript(folderName));
     } catch {
       loc = { how: "none", x: 0, y: 0 };
     }
-    if (loc?.how && loc.how !== "none" && loc.x) {
-      send("cangxia:progress", {
-        active: true,
-        current: 0,
-        total: 1,
-        message: `正在点进「${folderName}」`,
-      });
-      mouseClick(win, loc.x, loc.y);
-      await sleep(500);
-      try {
-        await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
-      } catch {
-        /* ignore */
-      }
-    }
-    await sleep(1600);
+    if (loc?.how && loc.how !== "none" && loc.x) mouseClick(win, loc.x, loc.y);
+    await sleep(1400);
   }
   return "none";
 }

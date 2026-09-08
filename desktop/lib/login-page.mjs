@@ -196,6 +196,21 @@ export const CLICK_FOLDER_TAB_SCRIPT = `(() => {
   return "clicked";
 })()`;
 
+export function normalizeFolderText(s) {
+  return String(s || "")
+    .replace(/\s+/g, "")
+    .replace(/[^\u4e00-\u9fff0-9a-zA-Z]/g, "");
+}
+
+export function isFolderCardText(text, name) {
+  const t = normalizeFolderText(text);
+  const n = normalizeFolderText(name);
+  return Boolean(n) && t.includes(`${n}共`) && /共\d+作品/.test(t);
+}
+
+const FOLDER_TEXT_HELPER = `const norm = (s) => String(s || "").replace(/\\s+/g, "").replace(/[^\\u4e00-\\u9fff0-9a-zA-Z]/g, "");
+    const textOf = (el) => norm(el.innerText || el.textContent || "");`;
+
 export function validFolderName(name) {
   const n = String(name || "").trim();
   if (!n || n.length > 16) return false;
@@ -206,31 +221,31 @@ export function validFolderName(name) {
 export function clickFolderCardScript(name) {
   return `(() => {
     const want = ${JSON.stringify(name)};
-    const textOf = (el) => (el.innerText || "").replace(/\\s+/g, "");
+    ${FOLDER_TEXT_HELPER}
+    const nw = norm(want);
     const nodes = [...document.querySelectorAll("div, a, span, li, section")];
     const cards = nodes.filter((el) => {
       const r = el.getBoundingClientRect();
-      if (r.width < 140 || r.height < 70 || r.width > 680) return false;
+      if (r.width < 100 || r.height < 48 || r.width > 720) return false;
       const t = textOf(el);
-      if (t.length > 36) return false;
-      return t.startsWith(want + "共") && /共\\d+作品/.test(t);
+      if (t.length > 80) return false;
+      return t.includes(nw + "共") && /共\\d+作品/.test(t);
     });
     cards.sort((a, b) => textOf(a).length - textOf(b).length);
     if (cards[0]) {
-      (cards[0].closest("a, button") || cards[0]).click();
-      return "card";
+      (cards[0].closest("a, button, [role='button']") || cards[0]).click();
+      return "card:" + textOf(cards[0]).slice(0, 24);
     }
     const rows = nodes.filter((el) => {
       const r = el.getBoundingClientRect();
-      if (r.left > 400 || r.width < 70 || r.height < 28 || r.height > 92) return false;
+      if (r.width < 48 || r.height < 20 || r.height > 100) return false;
       const t = textOf(el);
-      if (t.length > want.length + 8) return false;
-      return t === want || (t.startsWith(want) && /\\d{1,5}$/.test(t));
+      return t === nw || t.startsWith(nw);
     });
     rows.sort((a, b) => textOf(a).length - textOf(b).length);
     if (rows[0]) {
-      (rows[0].closest("a, button, li") || rows[0]).click();
-      return "row";
+      (rows[0].closest("a, button, li, [role='button']") || rows[0]).click();
+      return "row:" + textOf(rows[0]);
     }
     return "none";
   })()`;
@@ -239,19 +254,20 @@ export function clickFolderCardScript(name) {
 export function locateFolderCardScript(name) {
   return `(() => {
     const want = ${JSON.stringify(name)};
-    const textOf = (el) => (el.innerText || "").replace(/\\s+/g, "");
+    ${FOLDER_TEXT_HELPER}
+    const nw = norm(want);
     const hits = [];
     for (const el of document.querySelectorAll("div, a, li, section")) {
       const r = el.getBoundingClientRect();
-      if (r.width < 200 || r.height < 88 || r.width > 560 || r.height > 340) continue;
-      if (r.bottom < 150 || r.top > innerHeight - 24) continue;
+      if (r.width < 120 || r.height < 64 || r.width > 720 || r.height > 420) continue;
+      if (r.bottom < 120 || r.top > innerHeight - 16) continue;
       const t = textOf(el);
-      if (t.length > 48) continue;
-      if (t.startsWith(want + "共") && /共\\d+作品/.test(t)) {
+      if (t.length > 80) continue;
+      if (t.includes(nw + "共") && /共\\d+作品/.test(t)) {
         hits.push({
           how: "card",
-          x: Math.round(r.left + Math.min(96, r.width * 0.3)),
-          y: Math.round(r.top + Math.min(92, r.height * 0.48)),
+          x: Math.round(r.left + Math.min(110, r.width * 0.35)),
+          y: Math.round(r.top + Math.min(100, r.height * 0.42)),
           len: t.length,
           area: r.width * r.height,
         });
@@ -261,11 +277,10 @@ export function locateFolderCardScript(name) {
     if (hits[0]) return hits[0];
     for (const el of document.querySelectorAll("div, a, li, span")) {
       const r = el.getBoundingClientRect();
-      if (r.left > 400 || r.width < 80 || r.height < 32 || r.height > 92) continue;
+      if (r.width < 40 || r.height < 18 || r.height > 96) continue;
       const t = textOf(el);
-      if (t.length > want.length + 8) continue;
-      if (t === want || (t.startsWith(want) && /\\d{1,5}$/.test(t))) {
-        return { how: "row", x: Math.round(r.left + 48), y: Math.round(r.top + r.height / 2), len: t.length };
+      if (t === nw || t.startsWith(nw + "共")) {
+        return { how: "row", x: Math.round(r.left + Math.min(48, r.width / 2)), y: Math.round(r.top + r.height / 2), len: t.length };
       }
     }
     return { how: "none", x: 0, y: 0 };
@@ -275,24 +290,26 @@ export function locateFolderCardScript(name) {
 export function folderInsideScript(name) {
   return `(() => {
     const want = ${JSON.stringify(name)};
-    const textOf = (el) => (el.innerText || "").replace(/\\s+/g, "");
+    ${FOLDER_TEXT_HELPER}
     const vis = (el) => {
       const r = el.getBoundingClientRect();
       return r.width > 8 && r.height > 8 && r.bottom > 0 && r.top < innerHeight;
     };
+    const raw = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
     const has = (label) =>
-      [...document.querySelectorAll("span, div, button, a, p")].some((el) => textOf(el) === label && vis(el));
+      [...document.querySelectorAll("span, div, button, a, p")].some((el) => raw(el) === label && vis(el));
     const hasBack = has("返回");
     const hasAdd = has("添加视频");
     const names = new Set();
+    const nw = norm(want);
     for (const el of document.querySelectorAll("div, a, section")) {
       const t = textOf(el);
-      if (t.length > 36) continue;
+      if (t.length > 80) continue;
       const m = t.match(/^(.{1,16}?)共\\d+作品/);
       if (m && m[1] && !/收藏夹|视频|新建/.test(m[1])) names.add(m[1]);
     }
     const grid = names.size >= 3;
-    return { hasBack, hasAdd, grid, ok: Boolean((hasBack || hasAdd) && !grid), want };
+    return { hasBack, hasAdd, grid, ok: Boolean((hasBack || hasAdd) && !grid), want: nw };
   })()`;
 }
 
