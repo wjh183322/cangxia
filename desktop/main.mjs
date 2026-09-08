@@ -839,13 +839,14 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   ];
   try {
     await openFavoriteFresh(win);
-    for (const [label, run] of steps) {
+    for (let i = 0; i < steps.length; i += 1) {
+      const [label, run] = steps[i];
       if (refreshStop || !win || win.isDestroyed()) return;
       send("cangxia:progress", {
         active: true,
         current: countProgress(folderId, folderName, started),
         total: max,
-        message: `尝试 ${label} 读「${folderName}」`,
+        message: `正在用 ${label} 读「${folderName}」`,
       });
       const got = await run();
       if (got > 0) {
@@ -859,6 +860,15 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
         });
         return;
       }
+      const next = steps[i + 1];
+      if (!next) break;
+      send("cangxia:progress", {
+        active: true,
+        current: 0,
+        total: max,
+        message: `${label} 没读到，改试 ${next[0]}`,
+      });
+      await sleep(1600);
     }
     lastHarvestMethod = `五种方法都没读到「${folderName}」`;
     lastHarvestCount = 0;
