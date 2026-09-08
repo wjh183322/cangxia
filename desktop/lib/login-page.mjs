@@ -398,6 +398,32 @@ export const PAGE_COLLECTS_ID_SCRIPT = `(() => {
   return m ? m[1] : "";
 })()`;
 
+export const SCROLL_GRID_TOP_SCRIPT = `(() => {
+  const isScrollable = (el) => {
+    const st = getComputedStyle(el);
+    return (st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") && el.scrollHeight > el.clientHeight + 40;
+  };
+  const cards = [...document.querySelectorAll("a[href*='/video'], a[href*='/note'], a[href*='/aweme']")].filter((el) => {
+    const r = el.getBoundingClientRect();
+    return r.width >= 120 && r.height >= 140;
+  });
+  let n = 0;
+  if (cards[0]) {
+    let el = cards[0].parentElement;
+    while (el && el !== document.documentElement) {
+      if (isScrollable(el)) {
+        el.scrollTop = 0;
+        n += 1;
+      }
+      el = el.parentElement;
+    }
+  }
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  return n;
+})()`;
+
 export const SCROLL_FEED_SCRIPT = `(() => {
   const step = 380;
   const isScrollable = (el) => {

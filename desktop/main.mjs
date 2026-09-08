@@ -7,7 +7,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT } from "./lib/login-page.mjs";
 import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -537,6 +537,38 @@ function mouseClick(win, x, y) {
   wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
 }
 
+async function scrollGridTop(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    await win.webContents.executeJavaScript(SCROLL_GRID_TOP_SCRIPT);
+  } catch {
+    /* ignore */
+  }
+  const wc = win.webContents;
+  let x = 760;
+  let y = 420;
+  try {
+    const pt = await wc.executeJavaScript(WORK_GRID_POINT_SCRIPT);
+    if (pt?.x && pt?.y) {
+      x = pt.x;
+      y = pt.y;
+    }
+  } catch {
+    /* keep */
+  }
+  wc.sendInputEvent({ type: "mouseMove", x, y });
+  await sleep(60);
+  for (let i = 0; i < 8; i += 1) {
+    wc.sendInputEvent({ type: "mouseWheel", x, y, deltaX: 0, deltaY: -900, canScroll: true });
+    await sleep(80);
+  }
+  try {
+    await win.webContents.executeJavaScript(SCROLL_GRID_TOP_SCRIPT);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function wheelBurst(win) {
   const wc = win.webContents;
   let x = 760;
@@ -552,17 +584,22 @@ async function wheelBurst(win) {
   }
   wc.sendInputEvent({ type: "mouseMove", x, y });
   await sleep(80);
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 4; i++) {
     if (refreshStop || !win || win.isDestroyed()) return;
+    try {
+      await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
+    } catch {
+      /* ignore */
+    }
     wc.sendInputEvent({
       type: "mouseWheel",
       x,
       y,
       deltaX: 0,
-      deltaY: 1200,
+      deltaY: 480,
       canScroll: true,
     });
-    await sleep(600);
+    await sleep(700);
   }
 }
 
@@ -856,6 +893,16 @@ async function harvestMcp(win, ctx) {
     } catch {
       /* ignore */
     }
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: ctx.max || 1,
+      message: `「${ctx.folderName}」滚回顶部，从第1条开始`,
+    });
+    await scrollGridTop(win);
+    feedBuffer = [];
+    harvestIdOrder = [];
+    await sleep(1600);
     replayFolderBuffer();
     await drainPageFeeds(win);
     const got = await harvestByIntercept(win, ctx);
