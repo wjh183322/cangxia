@@ -1,4 +1,6 @@
 @import "../../src/styles.css";
+@source "../../src/**/*.{ts,tsx}";
+@source "./**/*.{ts,tsx}";
 
 html,
 body,
@@ -12,4 +14,6 @@ html {
 
 body {
   font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-fg);
 }
