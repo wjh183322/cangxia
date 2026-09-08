@@ -160,8 +160,9 @@ export function mapFolder(raw, index) {
 
 export function isCollectFeedUrl(url) {
   const u = String(url || "");
-  if (/collects\/list|collection\/list/i.test(u)) return false;
-  return /listcollection|collects\/video|collects\/aweme|\/aweme\/v1\/web\/collect|favorite\/(list|item)|\/web\/collects\//i.test(u);
+  if (/tab\/feed|recommend|hot\/search|follow\/feed|comment\/list|aweme\/detail|user\/post/i.test(u)) return false;
+  if (/collects\/list\/?(?:\?|$)/i.test(u) && !/video\/list/i.test(u)) return false;
+  return /listcollection|collects\/|favorite|\/web\/collect|aweme\/list/i.test(u);
 }
 
 export function mergeWorks(existing, incoming) {

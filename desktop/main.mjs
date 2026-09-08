@@ -193,9 +193,15 @@ async function attachNetwork(win) {
   try {
     wc.debugger.attach("1.3");
   } catch {
+    /* already attached */
+  }
+  try {
+    await wc.debugger.sendCommand("Network.enable");
+  } catch {
     return;
   }
-  await wc.debugger.sendCommand("Network.enable");
+  const pending = new Map();
+  wc.debugger.removeAllListeners("message");
   wc.debugger.on("message", async (_e, method, params) => {
     if (method === "Network.responseReceived") {
       const url = params.response?.url || "";
@@ -203,16 +209,28 @@ async function attachNetwork(win) {
         emitCaptcha("page");
         return;
       }
-      if (!/aweme|collect/i.test(url) || params.response.mimeType?.includes("html")) return;
-      try {
-        const body = await wc.debugger.sendCommand("Network.getResponseBody", {
-          requestId: params.requestId,
-        });
-        const json = JSON.parse(body.body);
-        ingestPayload(url, json);
-      } catch {
-        /* ignore non-json */
-      }
+      const mime = String(params.response?.mimeType || "");
+      if (mime.includes("html") || mime.includes("image") || mime.includes("video") || mime.includes("font")) return;
+      if (!/aweme|collect|favorite|sns/i.test(url)) return;
+      pending.set(params.requestId, url);
+      return;
+    }
+    if (method === "Network.loadingFailed") {
+      pending.delete(params.requestId);
+      return;
+    }
+    if (method !== "Network.loadingFinished") return;
+    const url = pending.get(params.requestId);
+    pending.delete(params.requestId);
+    if (!url) return;
+    try {
+      const body = await wc.debugger.sendCommand("Network.getResponseBody", { requestId: params.requestId });
+      const raw = body.base64Encoded ? Buffer.from(body.body, "base64").toString("utf8") : body.body;
+      const text = String(raw || "").trim();
+      if (!text.startsWith("{") && !text.startsWith("[")) return;
+      ingestPayload(url, JSON.parse(text));
+    } catch {
+      /* ignore non-json */
     }
   });
 }
