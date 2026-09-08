@@ -6,7 +6,7 @@ import { collectAwemes, mapAweme, mapFolder } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, LOGIN_PAGE_SCRIPT, isHttpUrl } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, isHttpUrl } from "./lib/login-page.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -20,6 +20,7 @@ protocol.registerSchemesAsPrivileged(
 
 let mainWindow = null;
 let douyinWindow = null;
+let qrWindow = null;
 let account = null;
 const captured = new Map();
 let folders = [{ id: "default", name: "收藏", isDefault: true }];
@@ -224,15 +225,21 @@ async function runRefreshLoop(win, max) {
 
 function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false } = {}) {
   if (douyinWindow && !douyinWindow.isDestroyed()) {
-    douyinWindow.focus();
-    void douyinWindow.loadURL(path);
+    if (assistQr) douyinWindow.hide();
+    else {
+      douyinWindow.show();
+      douyinWindow.focus();
+    }
+    void douyinWindow.loadURL(path, { userAgent: CHROME_UA });
     return douyinWindow;
   }
   douyinWindow = new BrowserWindow({
-    width: assistQr ? 560 : 980,
-    height: assistQr ? 760 : 760,
-    title: assistQr ? "抖音扫码登录" : "抖音登录 / 收藏",
-    parent: mainWindow || undefined,
+    width: 980,
+    height: 760,
+    title: assistQr ? "抖音登录" : "抖音收藏",
+    parent: assistQr ? undefined : mainWindow || undefined,
+    show: !assistQr,
+    skipTaskbar: assistQr,
     autoHideMenuBar: true,
     webPreferences: {
       partition: PARTITION,
@@ -250,36 +257,104 @@ function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false }
   void douyinWindow.loadURL(path, { userAgent: CHROME_UA });
   douyinWindow.on("closed", () => {
     douyinWindow = null;
-    loginWaiting = false;
+    if (loginWaiting) loginWaiting = false;
   });
   return douyinWindow;
+}
+
+function openQrWindow() {
+  if (qrWindow && !qrWindow.isDestroyed()) {
+    qrWindow.focus();
+    return qrWindow;
+  }
+  qrWindow = new BrowserWindow({
+    width: 420,
+    height: 560,
+    resizable: false,
+    title: "扫码登录",
+    parent: mainWindow || undefined,
+    autoHideMenuBar: true,
+    backgroundColor: "#0c0c0d",
+    webPreferences: {
+      preload: join(__dirname, "qr-preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  qrWindow.setMenuBarVisibility(false);
+  void qrWindow.loadFile(join(__dirname, "qr.html"));
+  qrWindow.on("closed", () => {
+    qrWindow = null;
+    if (loginWaiting) {
+      loginWaiting = false;
+      if (douyinWindow && !douyinWindow.isDestroyed()) douyinWindow.close();
+    }
+  });
+  return qrWindow;
+}
+
+function closeQrWindow() {
+  if (qrWindow && !qrWindow.isDestroyed()) qrWindow.close();
+  qrWindow = null;
+}
+
+function hideLoginBrowser() {
+  if (douyinWindow && !douyinWindow.isDestroyed()) douyinWindow.close();
+}
+
+async function pumpQr(win) {
+  let last = "";
+  let tries = 0;
+  while (loginWaiting && win && !win.isDestroyed()) {
+    tries += 1;
+    try {
+      const data = await win.webContents.executeJavaScript(EXTRACT_QR_SCRIPT);
+      if (data && data !== last && qrWindow && !qrWindow.isDestroyed()) {
+        last = data;
+        qrWindow.webContents.send("cangxia:qr-code", data);
+      }
+    } catch {
+      /* page not ready */
+    }
+    if (tries === 20 && !last && qrWindow && !qrWindow.isDestroyed()) {
+      qrWindow.webContents.send("cangxia:qr-status", "正在打开登录页…若较久没出码，请再点一次扫码登录");
+    }
+    await sleep(700);
+  }
+}
+
+function finishLoginAccount(cookies) {
+  loginWaiting = false;
+  clearCaptchaLock();
+  closeQrWindow();
+  hideLoginBrowser();
+  account = { nickname: "已登录", douyinId: "" };
+  const names = cookies.find((c) => c.name === "sessionid");
+  if (names) account.douyinId = names.value.slice(0, 6);
+  return { ok: true, account };
 }
 
 ipcMain.handle("cangxia:login", async () => {
   loginWaiting = true;
   const win = openDouyinWindow("https://www.douyin.com/", { assistQr: true });
+  openQrWindow();
+  void pumpQr(win);
   const deadline = Date.now() + 5 * 60 * 1000;
   while (Date.now() < deadline) {
     const cookies = await douyinSession().cookies.get({ domain: ".douyin.com" });
-    if (isLoggedInCookies(cookies)) {
-      loginWaiting = false;
-      clearCaptchaLock();
-      account = { nickname: "已登录", douyinId: "" };
-      try {
-        const names = cookies.find((c) => c.name === "sessionid");
-        if (names) account.douyinId = names.value.slice(0, 6);
-      } catch {
-        /* ignore */
-      }
-      return { ok: true, account };
-    }
+    if (isLoggedInCookies(cookies)) return finishLoginAccount(cookies);
+    if (!loginWaiting) return { ok: false, error: "已取消登录" };
     if (win.isDestroyed()) {
       loginWaiting = false;
+      closeQrWindow();
       return { ok: false, error: "登录窗口已关闭" };
     }
     await sleep(800);
   }
   loginWaiting = false;
+  closeQrWindow();
+  hideLoginBrowser();
   return { ok: false, error: "登录超时" };
 });
 

@@ -80,3 +80,50 @@ export const LOGIN_PAGE_SCRIPT = `(() => {
   }, 50000);
   return "hooked";
 })()`;
+
+export const EXTRACT_QR_SCRIPT = `(() => {
+  function grab(doc) {
+    if (!doc) return null;
+    const imgs = [...doc.querySelectorAll("img")];
+    const hit = imgs.find((img) => {
+      const blob = ((img.src || "") + " " + (img.className || "") + " " + (img.alt || "")).toLowerCase();
+      if (img.naturalWidth && img.naturalWidth < 80) return false;
+      if (/qr|qrcode|二维码/.test(blob)) return true;
+      return img.naturalWidth >= 140 && img.naturalWidth === img.naturalHeight && img.naturalWidth <= 480;
+    });
+    if (hit) {
+      if (hit.src && (hit.src.startsWith("data:") || hit.src.startsWith("http") || hit.src.startsWith("blob:"))) {
+        return hit.src;
+      }
+      try {
+        const c = doc.createElement("canvas");
+        c.width = hit.naturalWidth || 240;
+        c.height = hit.naturalHeight || 240;
+        c.getContext("2d").drawImage(hit, 0, 0);
+        return c.toDataURL("image/png");
+      } catch {
+        /* tainted */
+      }
+    }
+    const canvas = [...doc.querySelectorAll("canvas")].find((c) => c.width >= 80 && Math.abs(c.width - c.height) < 8);
+    if (canvas) {
+      try {
+        return canvas.toDataURL("image/png");
+      } catch {
+        /* tainted */
+      }
+    }
+    return null;
+  }
+  let data = grab(document);
+  if (data) return data;
+  for (const frame of document.querySelectorAll("iframe")) {
+    try {
+      data = grab(frame.contentDocument);
+      if (data) return data;
+    } catch {
+      /* cross origin */
+    }
+  }
+  return null;
+})()`;
