@@ -57,6 +57,7 @@ interface AppState {
   account: { nickname: string; douyinId: string };
   syncingBrowser: boolean;
   syncCount: { works: number; folders: number };
+  hiddenCollectIds: string[];
   login: () => Promise<void>;
   logout: () => Promise<void>;
   setTab: (tab: AppTab) => void;
@@ -101,6 +102,8 @@ interface AppState {
   finishRefresh: () => Promise<void>;
   applyRefreshResult: (folders: Folder[], works: Work[]) => void;
   startDownload: (ids: string[]) => void;
+  hideFromCollect: (ids: string[]) => void;
+  hideFolderFromCollect: (folderId: string) => void;
   resolveCaptcha: () => void;
   skipCaptchaBatch: () => void;
 }
@@ -136,9 +139,10 @@ function inFolder(work: Work, folderId: string) {
   return work.folderId === folderId || work.alsoInFolderIds.includes(folderId);
 }
 
-export function listWorks(works: Work[], folderId: string, kind: KindFilter) {
+export function listWorks(works: Work[], folderId: string, kind: KindFilter, hiddenIds: string[] = []) {
+  const hidden = new Set(hiddenIds);
   return works
-    .filter((w) => inFolder(w, folderId) && matchesKind(w, kind))
+    .filter((w) => !hidden.has(w.id) && inFolder(w, folderId) && matchesKind(w, kind))
     .sort((a, b) => b.collectedAt - a.collectedAt);
 }
 
@@ -184,6 +188,7 @@ export const useApp = create<AppState>()(
       account: { nickname: "", douyinId: "" },
       syncingBrowser: false,
       syncCount: { works: 0, folders: 0 },
+      hiddenCollectIds: [],
 
       login: async () => {
         const api = desktop();
@@ -499,12 +504,29 @@ export const useApp = create<AppState>()(
       },
       applyRefreshResult: (folders, works) => {
         const existing = liveDesktop() ? get().works.filter((w) => !isDemoWork(w)) : get().works;
+        const seen = new Set(works.map((w) => w.id));
         set({
           folders: folders.length ? folders : get().folders,
           works: mergeIncoming(existing, works),
+          hiddenCollectIds: get().hiddenCollectIds.filter((id) => !seen.has(id)),
           syncingBrowser: false,
           job: { active: false, current: 0, total: 0, message: "" },
         });
+      },
+
+      hideFromCollect: (ids) => {
+        const unique = [...new Set(ids.filter(Boolean))];
+        if (!unique.length) return;
+        set((s) => ({
+          hiddenCollectIds: [...new Set([...s.hiddenCollectIds, ...unique])],
+          selectedIds: s.selectedIds.filter((id) => !unique.includes(id)),
+        }));
+      },
+      hideFolderFromCollect: (folderId) => {
+        const ids = get()
+          .works.filter((w) => inFolder(w, folderId))
+          .map((w) => w.id);
+        get().hideFromCollect(ids);
       },
 
       startDownload: (ids) => {
@@ -587,6 +609,7 @@ export const useApp = create<AppState>()(
         kind: s.kind,
         tab: s.tab,
         dlTasks: s.dlTasks,
+        hiddenCollectIds: s.hiddenCollectIds,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
@@ -601,6 +624,7 @@ export const useApp = create<AppState>()(
           state.folderId = cleaned.folderId;
           state.dlTasks = hydrateTasks(cleaned.dlTasks || []);
         }
+        state.hiddenCollectIds = state.hiddenCollectIds || [];
       },
     },
   ),

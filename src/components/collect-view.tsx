@@ -2,10 +2,12 @@ import { KindTabs, kindHint } from "@/components/kind-tabs";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { listWorks, useApp } from "@/lib/store";
-import { folderTitle, kindChip, workIsComplete } from "@/lib/utils";
+import { folderTitle, kindChip } from "@/lib/utils";
+import { useState } from "react";
 
 export function CollectView() {
   const works = useApp((s) => s.works);
+  const folders = useApp((s) => s.folders);
   const folderId = useApp((s) => s.folderId);
   const kind = useApp((s) => s.kind);
   const setKind = useApp((s) => s.setKind);
@@ -15,8 +17,16 @@ export function CollectView() {
   const rangeTo = useApp((s) => s.rangeTo);
   const setRange = useApp((s) => s.setRange);
   const startDownload = useApp((s) => s.startDownload);
+  const hiddenCollectIds = useApp((s) => s.hiddenCollectIds);
+  const hideFromCollect = useApp((s) => s.hideFromCollect);
+  const hideFolderFromCollect = useApp((s) => s.hideFolderFromCollect);
+  const [confirmAll, setConfirmAll] = useState(false);
 
-  const list = listWorks(works, folderId, kind);
+  const list = listWorks(works, folderId, kind, hiddenCollectIds);
+  const folderName = folders.find((f) => f.id === folderId)?.name || "收藏";
+  const folderCount = works.filter(
+    (w) => !hiddenCollectIds.includes(w.id) && (w.folderId === folderId || w.alsoInFolderIds.includes(folderId)),
+  ).length;
 
   function downloadRange() {
     const from = Math.max(1, Number(rangeFrom) || 1);
@@ -57,21 +67,45 @@ export function CollectView() {
         <Button size="sm" onClick={() => startDownload(selectedIds)} disabled={selectedIds.length === 0}>
           下载选中（{selectedIds.length}）
         </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => hideFromCollect(selectedIds)}
+          disabled={selectedIds.length === 0}
+        >
+          移出清单（{selectedIds.length}）
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setConfirmAll(true)} disabled={folderCount === 0}>
+          全部移出当前夹
+        </Button>
       </div>
+
+      {confirmAll && (
+        <div className="flex flex-wrap items-center gap-3 border-b border-line bg-surface px-4 py-3 text-sm">
+          <p>
+            从清单移出「{folderName}」全部 {folderCount} 条，图库和硬盘文件不动。
+          </p>
+          <Button size="sm" onClick={() => { hideFolderFromCollect(folderId); setConfirmAll(false); }}>
+            确认移出
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setConfirmAll(false)}>
+            取消
+          </Button>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-auto p-4">
         {list.length === 0 ? (
-          <p className="py-16 text-center text-sm text-muted">这个列表是空的。点右上角刷新同步收藏。</p>
+          <p className="py-16 text-center text-sm text-muted">这个列表是空的。点右上角「读取收藏」同步。</p>
         ) : (
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {list.map((work, index) => {
               const checked = selectedIds.includes(work.id);
-              const locked = workIsComplete(work);
               return (
                 <li key={work.id}>
                   <button
                     type="button"
-                    onClick={() => !locked && toggleSelect(work.id)}
+                    onClick={() => toggleSelect(work.id)}
                     className={`group w-full overflow-hidden rounded-lg border text-left transition-colors ${
                       checked ? "border-accent" : "border-line hover:border-muted"
                     }`}
@@ -90,13 +124,11 @@ export function CollectView() {
                           {kindChip(work)}
                         </span>
                       )}
-                      {!locked && (
-                        <span
-                          className={`absolute right-2 top-2 size-5 rounded-xs border ${
-                            checked ? "border-accent bg-accent" : "border-fg/70 bg-bg/40"
-                          }`}
-                        />
-                      )}
+                      <span
+                        className={`absolute right-2 top-2 size-5 rounded-xs border ${
+                          checked ? "border-accent bg-accent" : "border-fg/70 bg-bg/40"
+                        }`}
+                      />
                     </div>
                     <div className="space-y-1 p-2.5">
                       <StatusBadge work={work} />

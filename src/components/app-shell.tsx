@@ -18,6 +18,7 @@ export function AppShell() {
   const folderId = useApp((s) => s.folderId);
   const setFolder = useApp((s) => s.setFolder);
   const works = useApp((s) => s.works);
+  const hiddenCollectIds = useApp((s) => s.hiddenCollectIds);
   const refresh = useApp((s) => s.refresh);
   const finishRefresh = useApp((s) => s.finishRefresh);
   const job = useApp((s) => s.job);
@@ -96,7 +97,9 @@ export function AppShell() {
           <aside className="flex gap-2 overflow-x-auto border-b border-line p-3 md:w-52 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
             {folders.map((folder) => {
               const count = works.filter(
-                (w) => w.folderId === folder.id || w.alsoInFolderIds.includes(folder.id),
+                (w) =>
+                  !hiddenCollectIds.includes(w.id) &&
+                  (w.folderId === folder.id || w.alsoInFolderIds.includes(folder.id)),
               ).length;
               const active = folderId === folder.id;
               return (
