@@ -34,7 +34,11 @@ function safeDecode(s) {
 function pickShareImageUrl(img) {
   if (!img || typeof img !== "object") return "";
   const lists = [img.url_list, img.urlList, img.origin_url?.url_list, img.display_image?.url_list];
-  const clean = (u) => String(u || "").replace(/~tplv-[^/?#]+/gi, "~noop");
+  const clean = (u) => {
+    const s = String(u || "");
+    if (/x-signature=|x-expires=/i.test(s)) return s;
+    return s.replace(/~tplv-[^/?#]+/gi, "~noop");
+  };
   for (const list of lists) {
     if (!Array.isArray(list)) continue;
     const jpeg = list.find(

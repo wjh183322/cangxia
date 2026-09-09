@@ -73,24 +73,23 @@ function looksWatermarked(url) {
 }
 
 function unwatermarkImageUrl(url) {
-  return String(url || "")
-    .replace(/~tplv-[^/?#]+/gi, "~noop")
-    .replace(/watermark=1/g, "watermark=0");
+  const u = String(url || "").replace(/watermark=1/g, "watermark=0");
+  if (!u) return "";
+  if (/x-signature=|x-expires=/i.test(u)) return u;
+  return u.replace(/~tplv-[^/?#]+/gi, "~noop");
 }
 
 function pushImageUrls(out, list) {
   if (!Array.isArray(list)) return;
   for (const raw of list) {
-    if (typeof raw !== "string" || !raw) continue;
-    const u = unwatermarkImageUrl(raw);
-    if (!u || out.includes(u)) continue;
-    if (looksWatermarked(u)) continue;
-    out.push(u);
+    if (typeof raw !== "string" || !raw || !/^https?:/i.test(raw)) continue;
+    const original = raw.replace(/watermark=1/g, "watermark=0");
+    if (!looksWatermarked(original) && !out.includes(original)) out.push(original);
   }
   for (const raw of list) {
     if (typeof raw !== "string" || !raw) continue;
     const u = unwatermarkImageUrl(raw);
-    if (u && !out.includes(u)) out.push(u);
+    if (u && !out.includes(u) && !looksWatermarked(u)) out.push(u);
   }
 }
 
@@ -173,8 +172,15 @@ function mediaFrom(aweme) {
   if (!isNote) {
     const cover = coverUrl(aweme.video);
     const clips = videoCandidates(aweme.video);
-    if (cover) images.push({ id: `${id}_still`, url: cover });
+    if (cover) images.push({ id: `${id}_still`, url: cover, urls: [cover] });
     if (clips.length) videos.push({ id: `${id}_v`, url: clips[0], urls: clips });
+  } else {
+    const cover = coverUrl(aweme.video);
+    if (cover && images[0]) {
+      images[0].urls = [...new Set([images[0].url, cover, ...(images[0].urls || [])].filter(Boolean))];
+    } else if (cover && !images.length) {
+      images.push({ id: `${id}_still`, url: cover, urls: [cover] });
+    }
   }
   let kind = "album";
   if (isNote) {
@@ -213,7 +219,7 @@ export function mapAweme(aweme, folder) {
     videos,
     collectedAt: (Number(aweme._collect_time || aweme.collects_time || aweme.collect_time) || 0) * 1000 || Date.now(),
     images,
-    coverUrl: images[0]?.url || "",
+    coverUrl: images[0]?.url || coverUrl(aweme.video) || "",
   };
 }
 

@@ -184,6 +184,26 @@ function douyinSession() {
   return session.fromPartition(PARTITION);
 }
 
+function attachCdnReferer(ses) {
+  const filter = {
+    urls: [
+      "*://*.douyinpic.com/*",
+      "*://*.byteimg.com/*",
+      "*://*.douyinstatic.com/*",
+      "*://*.ibytedtos.com/*",
+    ],
+  };
+  ses.webRequest.onBeforeSendHeaders(filter, (details, cb) => {
+    cb({
+      requestHeaders: {
+        ...details.requestHeaders,
+        Referer: "https://www.douyin.com/",
+        Origin: "https://www.douyin.com",
+      },
+    });
+  });
+}
+
 function blockAppSchemes(ses) {
   for (const scheme of APP_SCHEMES) {
     try {
@@ -1885,6 +1905,8 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   blockAppSchemes(session.defaultSession);
   blockAppSchemes(douyinSession());
+  attachCdnReferer(session.defaultSession);
+  attachCdnReferer(douyinSession());
   app.on("web-contents-created", (_e, contents) => hardenContents(contents));
   createMainWindow();
   app.on("activate", () => {

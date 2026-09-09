@@ -80,6 +80,21 @@ test("mapAweme album skips download_url_list watermark and uses url_list", () =>
   assert.equal(work.images[1].url, "https://x/origin/2.jpg");
 });
 
+test("mapAweme keeps signed album cover without rewriting tplv", () => {
+  const signed =
+    "https://p3-sign.douyinpic.com/tos-cn-i-0813/abc~tplv-dy-resize:1080:1080.jpeg?x-signature=abc&x-expires=9";
+  const work = mapAweme(
+    {
+      aweme_id: "s1",
+      aweme_type: 68,
+      images: [{ url_list: [signed] }],
+      author: { nickname: "a", unique_id: "b" },
+    },
+    { id: "default", name: "收藏" },
+  );
+  assert.equal(work.coverUrl, signed);
+});
+
 test("mapAweme album uses img_bitrate highest gear", () => {
   const work = mapAweme(
     {
