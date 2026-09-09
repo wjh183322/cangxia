@@ -1887,12 +1887,6 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   readingInside = folderName === "收藏";
   feedBuffer = [];
   const win = openDouyinWindow(startUrl, { forRefresh: true, deferLoad: true });
-  await attachNetwork(win);
-  try {
-    await win.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT);
-  } catch {
-    /* page may not exist yet */
-  }
   openProgressWindow();
   send("cangxia:progress", {
     active: true,
@@ -1900,13 +1894,12 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
     total: max,
     message: `已开始监听「${folderName}」，本次新增 ${max} 条`,
   });
-  try {
-    await win.loadURL(startUrl, { userAgent: CHROME_UA });
-  } catch {
-    /* harvest will retry */
-  }
   void (async () => {
     try {
+      await Promise.race([attachNetwork(win), sleep(1500)]);
+      if (win && !win.isDestroyed()) {
+        await win.loadURL(startUrl, { userAgent: CHROME_UA });
+      }
       const folder = ensureFolder(folderName);
       readingFolderId = folder.id;
       readingMax = max;
