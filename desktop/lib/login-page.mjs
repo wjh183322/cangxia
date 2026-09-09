@@ -442,8 +442,8 @@ export const PAGE_COLLECTS_ID_SCRIPT = `(() => {
     for (const e of performance.getEntriesByType("resource")) blob.push(e.name);
   } catch {}
   const text = blob.join("\\n");
-  const m = text.match(/collects_id=(\\d{4,})/) || text.match(/collects_id[\"':=]+(\\d{4,})/);
-  return m ? m[1] : "";
+  const all = [...text.matchAll(/collects_id=(\\d{4,})/g)].map((x) => x[1]);
+  return all.length ? all[all.length - 1] : "";
 })()`;
 
 export const SCROLL_GRID_TOP_SCRIPT = `(() => {

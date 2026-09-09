@@ -386,7 +386,10 @@ function ingestPayload(url, json) {
       traceNet(url, `id-mismatch:${feedId}`);
       return;
     }
-    if (feedId && (!readingCollectsId || feedId.length >= String(readingCollectsId).length)) readingCollectsId = feedId;
+    if (readingCollectsId && !feedId) {
+      traceNet(url, "no-id");
+      return;
+    }
   }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
@@ -666,17 +669,16 @@ async function waitFolderVideoList(win, collectsId, timeoutMs) {
   while (Date.now() - t0 < timeoutMs) {
     if (refreshStop || !win || win.isDestroyed()) return false;
     await drainPageFeeds(win);
-    const hit = feedBuffer.find(
-      (f) =>
-        /collects\/(video|aweme|item)\/list/i.test(f.url || "") ||
-        (id && sameCollectsId(f.feedId, id)),
-    );
-    const net = netTrace.some((t) => /collects\/(video|aweme|item)\/list/i.test(t));
-    if (hit) {
-      if (hit.feedId) readingCollectsId = String(hit.feedId);
-      return true;
-    }
-    if (net || (id && sameCollectsId(readingCollectsId, id) && captured.size)) return true;
+    const hit = feedBuffer.find((f) => {
+      const list = /collects\/(video|aweme|item)\/list/i.test(f.url || "");
+      if (!list) return false;
+      if (id && f.feedId) return sameCollectsId(f.feedId, id);
+      if (!id && f.feedId) return true;
+      return false;
+    });
+    if (hit) return true;
+    const net = netTrace.some((t) => /collects\/(video|aweme|item)\/list/i.test(t) && (!id || t.includes(id) || sameCollectsId(id, (t.match(/collects_id=(\d+)/) || [])[1])));
+    if (net) return true;
     if (countProgress(readingFolderId, readingFolderName, readingStarted) > 0) return true;
     await sleep(400);
   }
@@ -941,38 +943,26 @@ async function harvestMcp(win, ctx) {
     active: true,
     current: 0,
     total: ctx.max || 1,
-    message: `点「收藏」→「收藏夹」，再点「${ctx.folderName}」`,
+    message: `打开收藏夹列表，再点「${ctx.folderName}」`,
   });
-  await mcpClickFavorite(win);
-  await sleep(3000);
+  try {
+    await win.loadURL("https://www.douyin.com/user/self?showTab=favorite_collection", { userAgent: CHROME_UA });
+    await sleep(3500);
+  } catch {
+    await mcpClickFavorite(win);
+    await sleep(2500);
+  }
+  try {
+    await win.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT);
+  } catch {
+    /* ignore */
+  }
   const tab = await mcpClickFolderTab(win);
-  await sleep(4000);
+  await sleep(2500);
   await drainPageFeeds(win);
 
-  try {
-    const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
-    if (pageId) readingCollectsId = String(pageId);
-  } catch {
-    /* ignore */
-  }
-  const known = folderIdByName(ctx.folderName);
-  if (!readingCollectsId && known && !String(known).startsWith("folder_")) readingCollectsId = String(known);
-
-  try {
-    const inside = await win.webContents.executeJavaScript(folderInsideScript(ctx.folderName));
-    if (inside?.ok) {
-      send("cangxia:progress", {
-        active: true,
-        current: 0,
-        total: ctx.max || 1,
-        message: `已在「${ctx.folderName}」里，先切到别的夹再回来，逼出列表包`,
-      });
-      await win.webContents.executeJavaScript(clickOtherFolderScript(ctx.folderName));
-      await sleep(1800);
-    }
-  } catch {
-    /* ignore */
-  }
+  const expectedId = folderIdByName(ctx.folderName);
+  readingCollectsId = expectedId || "";
 
   readingInside = false;
   feedBuffer = [];
@@ -987,9 +977,41 @@ async function harvestMcp(win, ctx) {
   if (mcpHit?.how === "mcp" && mcpHit.x) mouseClick(win, mcpHit.x, mcpHit.y);
   const how = await openNamedFolder(win, ctx.folderName, { skipNav: true });
 
+  let inside = false;
+  for (let i = 0; i < 8; i += 1) {
+    try {
+      inside = Boolean((await win.webContents.executeJavaScript(folderInsideScript(ctx.folderName)))?.ok);
+    } catch {
+      inside = false;
+    }
+    if (inside) break;
+    await sleep(500);
+  }
+  if (!inside && how === "none" && mcpHit?.how === "none") {
+    noteHarvest(`没点进夹 tab=${tab}`);
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: ctx.max || 1,
+      message: `没点进「${ctx.folderName}」`,
+    });
+    return 0;
+  }
+  if (!inside) {
+    noteHarvest("页面不在目标夹");
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: ctx.max || 1,
+      message: `页面还不是「${ctx.folderName}」，不读，避免读成别的夹`,
+    });
+    return 0;
+  }
+
   try {
     const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
-    if (pageId) readingCollectsId = String(pageId);
+    if (pageId && (!readingCollectsId || sameCollectsId(pageId, readingCollectsId))) readingCollectsId = String(pageId);
+    else if (pageId && !readingCollectsId) readingCollectsId = String(pageId);
   } catch {
     /* ignore */
   }
