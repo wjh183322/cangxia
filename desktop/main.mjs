@@ -1085,12 +1085,15 @@ async function harvestMcp(win, ctx) {
     total: ctx.max || 1,
     message: `打开收藏夹列表，再点「${ctx.folderName}」`,
   });
-  try {
-    await win.loadURL(FAVORITE_FOLDER_LIST_URL, { userAgent: CHROME_UA });
-    await sleep(2800);
-  } catch {
-    await mcpClickFavorite(win);
-    await sleep(2500);
+  const href = await currentHref(win);
+  if (!/showSubTab=favorite_folder/i.test(href)) {
+    try {
+      await win.loadURL(FAVORITE_FOLDER_LIST_URL, { userAgent: CHROME_UA });
+      await sleep(2800);
+    } catch {
+      await mcpClickFavorite(win);
+      await sleep(2500);
+    }
   }
   try {
     await win.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT);
@@ -1112,10 +1115,15 @@ async function harvestMcp(win, ctx) {
 
   const expectedId = folderIdByName(ctx.folderName);
   readingCollectsId = expectedId || "";
-
-  readingInside = false;
-  feedBuffer = [];
   harvestIdOrder = [];
+  readingInside = true;
+  seenZeroCursor = true;
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: ctx.max || 1,
+    message: `已监听，点进「${ctx.folderName}」收第一包`,
+  });
 
   let mcpHit = { how: "none" };
   try {
@@ -1158,8 +1166,7 @@ async function harvestMcp(win, ctx) {
   }
 
   await scrollGridTop(win);
-  await sleep(700);
-
+  await sleep(400);
   try {
     const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
     if (pageId && (!readingCollectsId || sameCollectsId(pageId, readingCollectsId))) readingCollectsId = String(pageId);
@@ -1167,26 +1174,21 @@ async function harvestMcp(win, ctx) {
   } catch {
     /* ignore */
   }
-
-  send("cangxia:progress", {
-    active: true,
-    current: 0,
-    total: ctx.max || 1,
-    message: `按页面格子读「${ctx.folderName}」`,
-  });
   if (!readingCollectsId) {
     const fromBuf = feedBuffer.find((f) => f.feedId);
     if (fromBuf?.feedId) readingCollectsId = String(fromBuf.feedId);
   }
-  readingInside = true;
-  seenZeroCursor = true;
   replayFolderBuffer();
   await drainPageFeeds(win);
+  if (seenThisRead.size < (ctx.max || 1)) {
+    const got = await harvestByIntercept(win, ctx);
+    if (got) return got;
+  }
+  if (seenThisRead.size) return seenThisRead.size;
   const fromGrid = await harvestFromGrid(win, ctx);
   if (fromGrid) return fromGrid;
-  const got = await harvestByIntercept(win, ctx);
-  if (!got) noteHarvest(`拦包0条 collects/video/list id=${readingCollectsId || "?"}`);
-  return got;
+  noteHarvest(`拦包0条 collects/video/list id=${readingCollectsId || "?"}`);
+  return 0;
 }
 
 function jsonOk(json) {
@@ -1433,7 +1435,6 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   seenThisRead = new Set();
   readingCollectsId = folderName === "收藏" ? "" : folderIdByName(folderName);
   readingInside = folderName === "收藏";
-  feedBuffer = [];
   refreshReading = true;
   lastHarvestMethod = "";
   lastHarvestCount = 0;
@@ -1643,7 +1644,7 @@ async function watchAndRead(win, max) {
   if (win && !win.isDestroyed()) win.close();
 }
 
-function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false, forRefresh = false } = {}) {
+function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false, forRefresh = false, deferLoad = false } = {}) {
   const width = forRefresh ? 1320 : assistQr ? 560 : 1100;
   if (douyinWindow && !douyinWindow.isDestroyed()) {
     if (assistQr) douyinWindow.hide();
@@ -1652,7 +1653,7 @@ function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false, 
       douyinWindow.show();
       douyinWindow.focus();
     }
-    void douyinWindow.loadURL(path, { userAgent: CHROME_UA });
+    if (!deferLoad) void douyinWindow.loadURL(path, { userAgent: CHROME_UA });
     return douyinWindow;
   }
   douyinWindow = new BrowserWindow({
@@ -1682,7 +1683,7 @@ function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false, 
       void douyinWindow.webContents.executeJavaScript(installFolderWatchScript(folders.map((f) => f.name))).catch(() => {});
     }
   });
-  void douyinWindow.loadURL(path, { userAgent: CHROME_UA });
+  if (!deferLoad) void douyinWindow.loadURL(path, { userAgent: CHROME_UA });
   douyinWindow.on("closed", () => {
     douyinWindow = null;
     if (loginWaiting) loginWaiting = false;
@@ -1877,27 +1878,39 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   skippedIds = new Set();
   refreshStop = false;
   refreshPaused = false;
-  refreshReading = false;
   const max = Math.max(1, Number(settings.maxPerRefresh) || 300);
   const folderName = String(opts.folderName || "收藏").trim() || "收藏";
   const startUrl = folderName === "收藏" ? FAVORITE_ALL_URL : FAVORITE_FOLDER_LIST_URL;
-  const win = openDouyinWindow(startUrl, { forRefresh: true });
-  void attachNetwork(win);
+  refreshReading = true;
+  readingFolderName = folderName;
+  readingPattern = folderName === "收藏" ? "listcollection" : "collects/video/list";
+  readingInside = folderName === "收藏";
+  feedBuffer = [];
+  const win = openDouyinWindow(startUrl, { forRefresh: true, deferLoad: true });
+  await attachNetwork(win);
+  try {
+    await win.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT);
+  } catch {
+    /* page may not exist yet */
+  }
   openProgressWindow();
   send("cangxia:progress", {
     active: true,
     current: 0,
     total: max,
-    message: `「${folderName}」本次新增 ${max} 条，已有的会跳过`,
+    message: `已开始监听「${folderName}」，本次新增 ${max} 条`,
   });
+  try {
+    await win.loadURL(startUrl, { userAgent: CHROME_UA });
+  } catch {
+    /* harvest will retry */
+  }
   void (async () => {
     try {
       const folder = ensureFolder(folderName);
-      readingFolderName = folderName;
       readingFolderId = folder.id;
       readingMax = max;
       readingStarted = 0;
-      readingPattern = folderName === "收藏" ? "listcollection" : "collects/video/list";
       readingOrder =
         folderName === "收藏"
           ? Math.max(0, Number(opts.startAllIndex) || 0)
@@ -1905,9 +1918,8 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
       readingOrderStart = readingOrder;
       harvestIdOrder = [];
       seenThisRead.clear();
-      seenZeroCursor = false;
+      seenZeroCursor = folderName === "收藏";
       refreshReading = true;
-      await sleep(1200);
       await scrollUntilCap(win, {
         folderId: folder.id,
         folderName,
