@@ -378,6 +378,15 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
         if (!mapped.name || mapped.isDefault) continue;
         if (!validFolderName(mapped.name)) continue;
         ensureFolder(mapped.name, mapped.id);
+        poolAwemes(raw);
+        const nested = raw.aweme_list || raw.awemes || raw.item_list || raw.items;
+        if (Array.isArray(nested)) {
+          for (const a of nested) {
+            const inner = unwrapAweme(a) || a;
+            const id = String(inner?.aweme_id || inner?.id || "");
+            if (id) awemePool.set(id, inner);
+          }
+        }
       }
     }
   }
@@ -396,6 +405,22 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
     (/collects\/video\/list|collects\/aweme\/list|collects\/item\/list|\/web\/collects\//i.test(url) &&
       !/collects\/list\/?(?:\?|$)/i.test(url));
   poolAwemes(json);
+  const named = (readingFolderName || "收藏") !== "收藏";
+  const curEarly = cursorHint || requestCursor(url, postHint);
+  const feedIdEarly = String(
+    requestCollectsId(url, postHint) ||
+      json?.data?.collects_id_str ||
+      json?.collects_id_str ||
+      json?.data?.collects_id ||
+      json?.collects_id ||
+      "",
+  );
+  if (named && isFolderFeed && !readingInside) {
+    feedBuffer.push({ url, json, feedId: feedIdEarly, at: Date.now(), cursor: curEarly, post: postHint });
+    if (feedBuffer.length > 40) feedBuffer.shift();
+    traceNet(url, curEarly && curEarly !== "0" ? `buf-c${curEarly}` : "buf");
+    if (gridOrderOnly) return;
+  }
   if (gridOrderOnly) {
     traceNet(url, "pool");
     return;
@@ -406,14 +431,10 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
   }
   const root = json.data || json;
   const collectsMatch = String(url).match(/collects_id=(\d+)/);
-  const feedId = String(collectsMatch?.[1] || requestCollectsId(url, postHint) || root?.collects_id_str || root?.collects_id || "");
-  const named = (readingFolderName || "收藏") !== "收藏";
-  const cur = cursorHint || requestCursor(url, postHint);
+  const feedId = String(collectsMatch?.[1] || requestCollectsId(url, postHint) || root?.collects_id_str || root?.collects_id || feedIdEarly);
+  const cur = curEarly || requestCursor(url, postHint);
   if (named && isFolderFeed) {
     if (!readingInside) {
-      feedBuffer.push({ url, json, feedId, at: Date.now(), cursor: cur, post: postHint });
-      if (feedBuffer.length > 24) feedBuffer.shift();
-      traceNet(url, cur && cur !== "0" ? `buf-c${cur}` : "buf");
       return;
     }
     if (!readingCollectsId && feedId) readingCollectsId = feedId;
@@ -573,6 +594,66 @@ function replayFolderBuffer() {
   for (const item of recent) {
     if (item?.json) poolAwemes(item.json);
   }
+}
+
+function packetsForFolder(folderName) {
+  const id = folderIdByName(folderName) || readingCollectsId;
+  return feedBuffer.filter((x) => {
+    if (!x?.json || !collectAwemes(x.json).length) return false;
+    if (!id) return true;
+    if (!x.feedId) return true;
+    return sameCollectsId(x.feedId, id);
+  });
+}
+
+function ingestBufferedFirstPage(folderName) {
+  const folder = ensureFolder(folderName, readingCollectsId);
+  const id = folderIdByName(folderName) || readingCollectsId;
+  if (id && !String(id).startsWith("folder_")) readingCollectsId = String(id);
+  const packets = packetsForFolder(folderName).slice().sort((a, b) => {
+    const az = !a.cursor || a.cursor === "0" ? 0 : 1;
+    const bz = !b.cursor || b.cursor === "0" ? 0 : 1;
+    if (az !== bz) return az - bz;
+    return (a.at || 0) - (b.at || 0);
+  });
+  const cap = Math.max(1, Number(readingMax) || 20);
+  for (const p of packets) {
+    if (p.feedId && !readingCollectsId) readingCollectsId = String(p.feedId);
+    for (const aweme of collectAwemes(p.json)) {
+      const inner = unwrapAweme(aweme) || aweme;
+      const awemeId = String(inner.aweme_id || inner.id || "");
+      if (!awemeId) continue;
+      awemePool.set(awemeId, inner);
+      ingestPooledOrCard(
+        {
+          id: awemeId,
+          title: inner.desc || "",
+          kind: Array.isArray(inner.images) && inner.images.length ? "album" : "video",
+          cover: "",
+        },
+        folder,
+      );
+      if (seenThisRead.size >= cap) return seenThisRead.size;
+    }
+  }
+  return seenThisRead.size;
+}
+
+async function waitListPageFirst(win, folderName, timeoutMs = 7000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs && !refreshStop && win && !win.isDestroyed()) {
+    await drainPageFeeds(win);
+    if (packetsForFolder(folderName).length) return true;
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: Math.max(1, Number(readingMax) || 20),
+      message: `卡片墙收「${folderName}」第一包 ${Math.round((Date.now() - t0) / 1000)}s`,
+    });
+    await sleep(350);
+  }
+  await drainPageFeeds(win);
+  return packetsForFolder(folderName).length > 0;
 }
 
 async function snapshotWorks() {
@@ -1126,13 +1207,26 @@ async function harvestMcp(win, ctx) {
   harvestIdOrder = [];
   readingInside = false;
   seenZeroCursor = true;
-  gridOrderOnly = true;
+  gridOrderOnly = false;
   send("cangxia:progress", {
     active: true,
     current: 0,
     total: ctx.max || 1,
-    message: `已监听，点进「${ctx.folderName}」按封面墙顺序读`,
+    message: `卡片墙收「${ctx.folderName}」第一包`,
   });
+  await waitListPageFirst(win, ctx.folderName, 7000);
+  if (!readingCollectsId) {
+    const hit = packetsForFolder(ctx.folderName).find((x) => x.feedId);
+    if (hit?.feedId) readingCollectsId = String(hit.feedId);
+  }
+  const first = ingestBufferedFirstPage(ctx.folderName);
+  send("cangxia:progress", {
+    active: true,
+    current: Math.min(first, ctx.max || 1),
+    total: ctx.max || 1,
+    message: `卡片墙已收「${ctx.folderName}」${first} 条，点进夹继续`,
+  });
+  if (first >= (ctx.max || 1)) return first;
 
   let mcpHit = { how: "none" };
   try {
@@ -1193,12 +1287,10 @@ async function harvestMcp(win, ctx) {
   await drainPageFeeds(win);
   try {
     const fromGrid = await harvestFromGrid(win, ctx);
-    if (fromGrid) return fromGrid;
+    return fromGrid || first || 0;
   } finally {
     gridOrderOnly = false;
   }
-  noteHarvest(`格子0条 collects/video/list id=${readingCollectsId || "?"}`);
-  return 0;
 }
 
 function jsonOk(json) {
