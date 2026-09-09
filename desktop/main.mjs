@@ -7,7 +7,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, FOLDER_LIST_READY_SCRIPT, LOCATE_FOLDER_TAB_SCRIPT, FAVORITE_ALL_URL, FAVORITE_FOLDER_LIST_URL, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, FOLDER_LIST_READY_SCRIPT, LOCATE_FOLDER_TAB_SCRIPT, FAVORITE_ALL_URL, FAVORITE_FOLDER_LIST_URL, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, GRID_CARDS_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
 import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, requestCursor, requestCollectsId, isZeroCursor, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -42,6 +42,7 @@ let readingOrder = 0;
 let readingOrderStart = 0;
 let harvestIdOrder = [];
 let seenThisRead = new Set();
+let awemePool = new Map();
 let readingCollectsId = "";
 let readingInside = false;
 let seenZeroCursor = false;
@@ -65,7 +66,9 @@ function isNoiseUrl(url) {
 
 function isHarvestUrl(url) {
   if (isNoiseUrl(url)) return false;
-  return isCollectFeedUrl(url) || isFolderListUrl(url);
+  const u = String(url || "");
+  if (isCollectFeedUrl(u) || isFolderListUrl(u)) return true;
+  return /aweme\/v1\/web\//i.test(u);
 }
 
 function traceNet(url, tag) {
@@ -391,6 +394,7 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
     hasCollectsQuery ||
     (/collects\/video\/list|collects\/aweme\/list|collects\/item\/list|\/web\/collects\//i.test(url) &&
       !/collects\/list\/?(?:\?|$)/i.test(url));
+  poolAwemes(json);
   if (readingPattern === "listcollection" ? !isList : !isFolderFeed) {
     traceNet(url, isList ? "skip-总收藏" : "skip");
     return;
@@ -468,6 +472,86 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
     seenThisRead.add(work.id);
   }
   send("cangxia:sync-count", { works: captured.size, folders: folders.length });
+}
+
+function poolAwemes(json) {
+  for (const aweme of collectAwemes(json)) {
+    const inner = unwrapAweme(aweme) || aweme;
+    const id = String(inner.aweme_id || inner.id || aweme.aweme_id || "");
+    if (id) awemePool.set(id, inner);
+  }
+}
+
+function ingestPooledOrCard(card, folder) {
+  const id = String(card?.id || "");
+  if (!id) return;
+  const cap = Math.max(1, Number(readingMax) || 300);
+  if (knownSkip.has(id)) {
+    skippedIds.add(id);
+    return;
+  }
+  if (seenThisRead.size >= cap) return;
+  const folderRef = folder || ensureFolder(readingFolderName, readingCollectsId);
+  const pooled = awemePool.get(id);
+  const work = mapAweme(
+    pooled || {
+      aweme_id: id,
+      desc: card.title || "未命名",
+      aweme_type: card.kind === "video" ? 0 : 68,
+      video: card.cover ? { origin_cover: { url_list: [card.cover] }, cover: { url_list: [card.cover] } } : {},
+      images: card.kind !== "video" && card.cover ? [{ url_list: [card.cover] }] : [],
+    },
+    folderRef,
+  );
+  if (!work.id) return;
+  if (folderRef && !folderRef.isDefault) {
+    work.alsoInFolderIds = [...new Set([...(work.alsoInFolderIds || []), "default"])];
+  }
+  if (!harvestIdOrder.includes(work.id)) harvestIdOrder.push(work.id);
+  const pos = harvestIdOrder.indexOf(work.id);
+  if (readingFolderName === "收藏") work.allIndex = readingOrderStart + Math.max(0, pos);
+  else work.listIndex = readingOrderStart + Math.max(0, pos);
+  captured.set(work.id, work);
+  seenThisRead.add(work.id);
+}
+
+async function harvestFromGrid(win, ctx) {
+  const max = Math.max(1, Number(ctx.max) || 20);
+  const folder = ensureFolder(ctx.folderName, readingCollectsId);
+  const seen = new Set();
+  let idle = 0;
+  await scrollGridTop(win);
+  await sleep(400);
+  while (win && !win.isDestroyed() && !refreshStop && seenThisRead.size < max && idle < 10) {
+    await drainPageFeeds(win);
+    let cards = [];
+    try {
+      cards = await win.webContents.executeJavaScript(GRID_CARDS_SCRIPT);
+    } catch {
+      cards = [];
+    }
+    let fresh = 0;
+    for (const card of cards || []) {
+      const id = String(card?.id || "");
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      fresh += 1;
+      ingestPooledOrCard(card, folder);
+      if (seenThisRead.size >= max) break;
+    }
+    send("cangxia:progress", {
+      active: true,
+      current: Math.min(seenThisRead.size, max),
+      total: max,
+      message: `页面格子读「${ctx.folderName}」${seenThisRead.size}/${max}`,
+    });
+    if (seenThisRead.size >= max) break;
+    if (!fresh) idle += 1;
+    else idle = 0;
+    await wheelBurst(win);
+    await sleep(280);
+  }
+  return seenThisRead.size;
 }
 
 function replayFolderBuffer() {
@@ -1088,19 +1172,8 @@ async function harvestMcp(win, ctx) {
     active: true,
     current: 0,
     total: ctx.max || 1,
-    message: `等「${ctx.folderName}」collects/video/list`,
+    message: `按页面格子读「${ctx.folderName}」`,
   });
-  const gotFeed = await waitFolderVideoList(win, readingCollectsId, 30000);
-  if (how === "none" && !gotFeed && mcpHit?.how === "none") {
-    noteHarvest(`没点进夹 tab=${tab}`);
-    send("cangxia:progress", {
-      active: true,
-      current: 0,
-      total: ctx.max || 1,
-      message: `没点进「${ctx.folderName}」`,
-    });
-    return 0;
-  }
   if (!readingCollectsId) {
     const fromBuf = feedBuffer.find((f) => f.feedId);
     if (fromBuf?.feedId) readingCollectsId = String(fromBuf.feedId);
@@ -1109,6 +1182,8 @@ async function harvestMcp(win, ctx) {
   seenZeroCursor = true;
   replayFolderBuffer();
   await drainPageFeeds(win);
+  const fromGrid = await harvestFromGrid(win, ctx);
+  if (fromGrid) return fromGrid;
   const got = await harvestByIntercept(win, ctx);
   if (!got) noteHarvest(`拦包0条 collects/video/list id=${readingCollectsId || "?"}`);
   return got;
@@ -1796,6 +1871,7 @@ ipcMain.handle("cangxia:file-status", async (_e, ids = []) => {
 ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   captured.clear();
   seenThisRead.clear();
+  awemePool.clear();
   harvestIdOrder = [];
   knownSkip = new Set((opts.knownIds || []).map((id) => String(id)));
   skippedIds = new Set();

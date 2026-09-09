@@ -475,6 +475,39 @@ export const WORK_GRID_POINT_SCRIPT = `(() => {
   return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
 })()`;
 
+export const GRID_CARDS_SCRIPT = `(() => {
+  const cards = [...document.querySelectorAll("a[href*='/video/'], a[href*='/note/'], a[href*='/aweme/']")].filter((el) => {
+    const r = el.getBoundingClientRect();
+    return r.width >= 90 && r.height >= 110 && r.left > 220;
+  });
+  cards.sort((a, b) => {
+    const ra = a.getBoundingClientRect();
+    const rb = b.getBoundingClientRect();
+    if (Math.abs(ra.top - rb.top) > 48) return ra.top - rb.top;
+    return ra.left - rb.left;
+  });
+  const out = [];
+  const seen = new Set();
+  for (const a of cards) {
+    const href = a.getAttribute("href") || a.href || "";
+    const m = href.match(/\\/(video|note|aweme)\\/(\\d{5,})/);
+    if (!m || seen.has(m[2])) continue;
+    seen.add(m[2]);
+    const img = a.querySelector("img");
+    const lines = String(a.innerText || "")
+      .split("\\n")
+      .map((t) => t.trim())
+      .filter((t) => t && !/^\\d+$/.test(t) && !/^\\d+\\.\\d+[万w]?$/.test(t));
+    out.push({
+      id: m[2],
+      kind: m[1] === "video" ? "video" : "album",
+      cover: img?.currentSrc || img?.src || "",
+      title: lines[lines.length - 1] || "",
+    });
+  }
+  return out;
+})()`;
+
 export const PAGE_COLLECTS_ID_SCRIPT = `(() => {
   const blob = [location.href];
   try {
