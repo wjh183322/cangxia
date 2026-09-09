@@ -285,6 +285,28 @@ export function clickFolderSideScript(name) {
   })()`;
 }
 
+export function clickOtherFolderScript(exceptName) {
+  return `(() => {
+    const skip = ${JSON.stringify(exceptName)};
+    ${FOLDER_TEXT_HELPER}
+    const hits = [];
+    for (const el of document.querySelectorAll("div, a, li, span, p, button")) {
+      const r = el.getBoundingClientRect();
+      if (r.left > 520 || r.top < 70 || r.bottom > innerHeight - 4) continue;
+      if (r.width < 48 || r.width > 520 || r.height < 20 || r.height > 110) continue;
+      const t = textOf(el);
+      if (!t || t.length > 28) continue;
+      const name = norm(t).replace(/\\d+$/g, "").replace(/共.*$/, "").trim();
+      if (!name || name === skip || name === "收藏" || name === "新建收藏夹" || name === "收藏夹") continue;
+      hits.push({ el, name, y: r.top });
+    }
+    hits.sort((a, b) => a.y - b.y);
+    if (!hits[0]) return "none";
+    (hits[0].el.closest("a, button, li, [role='button']") || hits[0].el).click();
+    return "other:" + hits[0].name;
+  })()`;
+}
+
 export function clickFolderCardScript(name) {
   return `(() => {
     const want = ${JSON.stringify(name)};

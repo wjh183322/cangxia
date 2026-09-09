@@ -1,3 +1,27 @@
+export function parseDouyinJson(text) {
+  const src = String(text || "").trim();
+  if (!src) return null;
+  const quoted = src.replace(/([:\[,])\s*(\d{16,})(?=\s*[,}\]])/g, '$1"$2"');
+  try {
+    return JSON.parse(quoted);
+  } catch {
+    try {
+      return JSON.parse(src);
+    } catch {
+      return null;
+    }
+  }
+}
+
+export function sameCollectsId(a, b) {
+  const x = String(a || "");
+  const y = String(b || "");
+  if (!x || !y) return false;
+  if (x === y) return true;
+  if (x.length < 15 || y.length < 15) return false;
+  return x.slice(0, 15) === y.slice(0, 15);
+}
+
 export function commonQuery(extra = {}) {
   return {
     device_platform: "webapp",
@@ -155,7 +179,7 @@ export function hookedXhrScript({ method = "GET", url, body = null }) {
     xhr.timeout = 18000;
     xhr.onload = () => {
       let json = null;
-      try { json = JSON.parse(xhr.responseText); } catch {}
+      try { json = JSON.parse(String(xhr.responseText || "").replace(/([:\\[,])\\s*(\\d{16,})(?=\\s*[,\\}\\]])/g, '$1"$2"')); } catch { try { json = JSON.parse(xhr.responseText); } catch {} }
       resolve({ status: xhr.status, json, text: String(xhr.responseText || "").slice(0, 220) });
     };
     xhr.onerror = () => resolve({ status: 0, json: null, text: "xhr-error" });
@@ -174,7 +198,7 @@ export function pageFetchScript({ method = "GET", url, body = null }) {
   }).then(async (r) => {
     const text = await r.text();
     let json = null;
-    try { json = JSON.parse(text); } catch {}
+    try { json = JSON.parse(String(text || "").replace(/([:\\[,])\\s*(\\d{16,})(?=\\s*[,\\}\\]])/g, '$1"$2"')); } catch { try { json = JSON.parse(text); } catch {} }
     return { status: r.status, json, text: String(text || "").slice(0, 220) };
   }).catch((e) => ({ status: 0, json: null, text: String(e) })))()`;
 }
@@ -186,7 +210,7 @@ export function parseCollectsList(json) {
   if (!Array.isArray(list)) return [];
   return list
     .map((raw) => ({
-      id: String(raw.collects_id || raw.collection_id || raw.id || ""),
+      id: String(raw.collects_id_str || raw.collects_id || raw.collection_id || raw.id || ""),
       name: String(raw.collects_name || raw.name || raw.title || "").trim(),
       count: Number(raw.total_number || raw.count || 0),
     }))

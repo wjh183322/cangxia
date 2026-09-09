@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { commonQuery, parseCollectsList, nextCursor, signUrlScript, PAGE_TOKENS_SCRIPT } from "./page-api.mjs";
+import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, nextCursor, signUrlScript, PAGE_TOKENS_SCRIPT } from "./page-api.mjs";
 
 test("parseCollectsList reads collects_id and name", () => {
   const list = parseCollectsList({
@@ -12,6 +12,17 @@ test("parseCollectsList reads collects_id and name", () => {
   assert.equal(list[0].name, "玛丽罗斯");
   assert.equal(list[0].id, "111");
   assert.equal(list[1].id, "222");
+});
+
+test("parseDouyinJson keeps snowflake collects_id as string", () => {
+  const json = parseDouyinJson('{"collects_id":7598218830082497024,"collects_name":"玛丽罗斯"}');
+  assert.equal(json.collects_id, "7598218830082497024");
+  assert.notEqual(json.collects_id, "7598218830082497000");
+});
+
+test("sameCollectsId treats rounded Number as the same folder", () => {
+  assert.equal(sameCollectsId("7598218830082497024", "7598218830082497000"), true);
+  assert.equal(sameCollectsId("111", "222"), false);
 });
 
 test("signUrlScript includes ticket-guard headers", () => {

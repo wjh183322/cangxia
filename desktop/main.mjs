@@ -7,8 +7,8 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
-import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
+import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -294,7 +294,7 @@ async function attachNetwork(win) {
         traceNet(url, "notjson");
         return;
       }
-      ingestPayload(url, JSON.parse(text));
+      ingestPayload(url, parseDouyinJson(text) || JSON.parse(text));
     } catch {
       /* ignore non-json */
     }
@@ -372,7 +372,7 @@ function ingestPayload(url, json) {
   }
   const root = json.data || json;
   const collectsMatch = String(url).match(/collects_id=(\d+)/);
-  const feedId = String(collectsMatch?.[1] || root?.collects_id || "");
+  const feedId = String(collectsMatch?.[1] || root?.collects_id_str || root?.collects_id || "");
   const named = (readingFolderName || "收藏") !== "收藏";
   if (named && isFolderFeed) {
     if (!readingInside) {
@@ -382,8 +382,11 @@ function ingestPayload(url, json) {
       return;
     }
     if (!readingCollectsId && feedId) readingCollectsId = feedId;
-    if (readingCollectsId && feedId && feedId !== readingCollectsId) return;
-    // 进夹后即使 URL 没带 collects_id 也收下（POST body 常不在 query 里）
+    if (readingCollectsId && feedId && !sameCollectsId(feedId, readingCollectsId)) {
+      traceNet(url, `id-mismatch:${feedId}`);
+      return;
+    }
+    if (feedId && (!readingCollectsId || feedId.length >= String(readingCollectsId).length)) readingCollectsId = feedId;
   }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
@@ -441,7 +444,7 @@ function replayFolderBuffer() {
   const recent = feedBuffer.filter((x) => Date.now() - x.at < 25000);
   feedBuffer = [];
   let pick = [];
-  if (readingCollectsId) pick = recent.filter((x) => x.feedId === readingCollectsId);
+  if (readingCollectsId) pick = recent.filter((x) => !x.feedId || sameCollectsId(x.feedId, readingCollectsId));
   else if (recent.length) {
     pick = recent.slice(-1);
     if (pick[0]?.feedId) readingCollectsId = pick[0].feedId;
@@ -526,7 +529,7 @@ async function drainPageFeeds(win) {
       const url = /^https?:/i.test(rawUrl) ? rawUrl : `https://www.douyin.com${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`;
       let json = null;
       try {
-        json = JSON.parse(f.text);
+        json = parseDouyinJson(f.text);
       } catch {
         json = null;
       }
@@ -663,9 +666,17 @@ async function waitFolderVideoList(win, collectsId, timeoutMs) {
   while (Date.now() - t0 < timeoutMs) {
     if (refreshStop || !win || win.isDestroyed()) return false;
     await drainPageFeeds(win);
-    const hit = feedBuffer.some((f) => (id && f.feedId === id) || /collects\/video\/list/i.test(f.url || ""));
-    const net = netTrace.some((t) => /collects\/video\/list/i.test(t) && (!id || t.includes(id)));
-    if (hit || net || (id && readingCollectsId === id && captured.size)) return true;
+    const hit = feedBuffer.find(
+      (f) =>
+        /collects\/(video|aweme|item)\/list/i.test(f.url || "") ||
+        (id && sameCollectsId(f.feedId, id)),
+    );
+    const net = netTrace.some((t) => /collects\/(video|aweme|item)\/list/i.test(t));
+    if (hit) {
+      if (hit.feedId) readingCollectsId = String(hit.feedId);
+      return true;
+    }
+    if (net || (id && sameCollectsId(readingCollectsId, id) && captured.size)) return true;
     if (countProgress(readingFolderId, readingFolderName, readingStarted) > 0) return true;
     await sleep(400);
   }
@@ -729,7 +740,7 @@ function sessionRequest(method, url, body = null) {
       res.on("end", () => {
         let json = null;
         try {
-          json = JSON.parse(data);
+          json = parseDouyinJson(data);
         } catch {
           json = null;
         }
@@ -938,8 +949,30 @@ async function harvestMcp(win, ctx) {
   await sleep(4000);
   await drainPageFeeds(win);
 
+  try {
+    const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
+    if (pageId) readingCollectsId = String(pageId);
+  } catch {
+    /* ignore */
+  }
   const known = folderIdByName(ctx.folderName);
-  if (known && !String(known).startsWith("folder_")) readingCollectsId = String(known);
+  if (!readingCollectsId && known && !String(known).startsWith("folder_")) readingCollectsId = String(known);
+
+  try {
+    const inside = await win.webContents.executeJavaScript(folderInsideScript(ctx.folderName));
+    if (inside?.ok) {
+      send("cangxia:progress", {
+        active: true,
+        current: 0,
+        total: ctx.max || 1,
+        message: `已在「${ctx.folderName}」里，先切到别的夹再回来，逼出列表包`,
+      });
+      await win.webContents.executeJavaScript(clickOtherFolderScript(ctx.folderName));
+      await sleep(1800);
+    }
+  } catch {
+    /* ignore */
+  }
 
   readingInside = false;
   feedBuffer = [];
@@ -1240,7 +1273,10 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   lastHarvestCount = 0;
   netTrace = [];
   const ctx = { folderId, folderName, max, started, label: "" };
-  const steps = [["拦页面", () => harvestMcp(win, ctx)]];
+  const steps = [
+    ["拦页面", () => harvestMcp(win, ctx)],
+    ["页面fetch", () => harvestVia(win, ctx, signedRequest)],
+  ];
   const tried = [];
   const addedSince = (before) => {
     let n = 0;

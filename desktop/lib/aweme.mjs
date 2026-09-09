@@ -247,7 +247,7 @@ export function collectAwemes(payload) {
 }
 
 export function mapFolder(raw, index) {
-  const id = String(raw.collects_id || raw.collection_id || raw.id || `folder_${index}`);
+  const id = String(raw.collects_id_str || raw.collects_id || raw.collection_id || raw.id || `folder_${index}`);
   const name = raw.collects_name || raw.name || raw.title || (index === 0 ? "收藏" : `收藏夹${index}`);
   return { id, name, isDefault: Boolean(raw.is_default) || name === "收藏" };
 }
