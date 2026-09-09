@@ -400,7 +400,6 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
   const feedId = String(collectsMatch?.[1] || requestCollectsId(url, postHint) || root?.collects_id_str || root?.collects_id || "");
   const named = (readingFolderName || "收藏") !== "收藏";
   const cur = cursorHint || requestCursor(url, postHint);
-  const unknownPost = Boolean(postHint === "" && /collects\/(video|aweme|item)\/list/i.test(url) && !/[?&]cursor=/i.test(url));
   if (named && isFolderFeed) {
     if (!readingInside) {
       feedBuffer.push({ url, json, feedId, at: Date.now(), cursor: cur, post: postHint });
@@ -413,15 +412,11 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
       traceNet(url, `id-mismatch:${feedId}`);
       return;
     }
-    if (cur && cur !== "0" && !seenZeroCursor) {
+    if (cur && Number(cur) > 0 && seenThisRead.size === 0) {
       traceNet(url, `late-cursor:${cur}`);
       return;
     }
-    if (!isZeroCursor(url, postHint, unknownPost) && !seenZeroCursor) {
-      traceNet(url, "late-cursor:unknown");
-      return;
-    }
-    if (isZeroCursor(url, postHint, false) || cur === "0") seenZeroCursor = true;
+    if (!cur || cur === "0" || seenThisRead.size > 0) seenZeroCursor = true;
   }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
@@ -443,7 +438,7 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
       continue;
     }
     const isNew = id && !captured.has(id);
-    if (isNew && countProgress(readingFolderId, reading, readingStarted) >= cap) {
+    if (isNew && seenThisRead.size >= cap) {
       refreshReading = false;
       break;
     }
@@ -478,7 +473,7 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
 function replayFolderBuffer() {
   const recent = feedBuffer.filter((x) => Date.now() - x.at < 25000);
   feedBuffer = [];
-  let pick = recent.filter((x) => !x.cursor || x.cursor === "0");
+  let pick = recent;
   if (readingCollectsId) pick = pick.filter((x) => !x.feedId || sameCollectsId(x.feedId, readingCollectsId));
   else if (pick.length) {
     pick = pick.slice(-1);
@@ -549,10 +544,8 @@ function countInFolder(folderId) {
   return n;
 }
 
-function countProgress(folderId, folderName, started) {
-  if (folderName === "收藏") return Math.max(0, captured.size - started);
-  if (folderId) return Math.max(0, countInFolder(folderId) - started);
-  return Math.max(0, captured.size - started);
+function countProgress() {
+  return seenThisRead.size;
 }
 
 async function drainPageFeeds(win) {
@@ -1113,21 +1106,9 @@ async function harvestMcp(win, ctx) {
     if (fromBuf?.feedId) readingCollectsId = String(fromBuf.feedId);
   }
   readingInside = true;
+  seenZeroCursor = true;
   replayFolderBuffer();
   await drainPageFeeds(win);
-  if (!seenZeroCursor) {
-    noteHarvest("不是从第一条开始");
-    send("cangxia:progress", {
-      active: true,
-      current: 0,
-      total: ctx.max || 1,
-      message: `「${ctx.folderName}」列表没从第一条开始，改用接口读首页`,
-    });
-    for (const id of [...seenThisRead]) captured.delete(id);
-    seenThisRead.clear();
-    harvestIdOrder = [];
-    return 0;
-  }
   const got = await harvestByIntercept(win, ctx);
   if (!got) noteHarvest(`拦包0条 collects/video/list id=${readingCollectsId || "?"}`);
   return got;
@@ -1814,6 +1795,8 @@ ipcMain.handle("cangxia:file-status", async (_e, ids = []) => {
 
 ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   captured.clear();
+  seenThisRead.clear();
+  harvestIdOrder = [];
   knownSkip = new Set((opts.knownIds || []).map((id) => String(id)));
   skippedIds = new Set();
   refreshStop = false;
@@ -1845,6 +1828,7 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
           : Math.max(0, Number(opts.startListIndex) || 0);
       readingOrderStart = readingOrder;
       harvestIdOrder = [];
+      seenThisRead.clear();
       seenZeroCursor = false;
       refreshReading = true;
       await sleep(1200);
