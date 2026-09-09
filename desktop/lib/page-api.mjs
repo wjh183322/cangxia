@@ -22,6 +22,17 @@ export function sameCollectsId(a, b) {
   return x.slice(0, 15) === y.slice(0, 15);
 }
 
+export function requestCursor(url, post = "") {
+  const s = `${url}\n${post}`;
+  const m = s.match(/[?&](?:cursor|max_cursor)=(\d+)/i) || s.match(/["']?(?:cursor|max_cursor)["']?\s*[:=]\s*["']?(\d+)/i);
+  return m ? String(m[1]) : "";
+}
+
+export function isZeroCursor(url, post = "") {
+  const c = requestCursor(url, post);
+  return !c || c === "0";
+}
+
 export function commonQuery(extra = {}) {
   return {
     device_platform: "webapp",

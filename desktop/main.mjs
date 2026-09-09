@@ -8,7 +8,7 @@ import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
 import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
-import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
+import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, requestCursor, isZeroCursor, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -44,6 +44,7 @@ let harvestIdOrder = [];
 let seenThisRead = new Set();
 let readingCollectsId = "";
 let readingInside = false;
+let seenZeroCursor = false;
 let lastHarvestMethod = "";
 let lastHarvestCount = 0;
 let lastHarvestError = "";
@@ -265,6 +266,13 @@ async function attachNetwork(win) {
   const pending = new Map();
   wc.debugger.removeAllListeners("message");
   wc.debugger.on("message", async (_e, method, params) => {
+    if (method === "Network.requestWillBeSent") {
+      const req = params.request || {};
+      const url = req.url || "";
+      if (!isHarvestUrl(url)) return;
+      pending.set(params.requestId, { url, cursor: requestCursor(url, req.postData || "") });
+      return;
+    }
     if (method === "Network.responseReceived") {
       const url = params.response?.url || "";
       if (looksLikeCaptcha(url)) {
@@ -274,8 +282,9 @@ async function attachNetwork(win) {
       const mime = String(params.response?.mimeType || "");
       if (mime.includes("html") || mime.includes("image") || mime.includes("video") || mime.includes("font")) return;
       if (!isHarvestUrl(url)) return;
-      pending.set(params.requestId, url);
-      traceNet(url, "net");
+      const prev = pending.get(params.requestId) || { url, cursor: requestCursor(url) };
+      pending.set(params.requestId, { ...prev, url });
+      traceNet(url, prev.cursor && prev.cursor !== "0" ? `net-c${prev.cursor}` : "net");
       return;
     }
     if (method === "Network.loadingFailed") {
@@ -283,18 +292,18 @@ async function attachNetwork(win) {
       return;
     }
     if (method !== "Network.loadingFinished") return;
-    const url = pending.get(params.requestId);
+    const meta = pending.get(params.requestId);
     pending.delete(params.requestId);
-    if (!url) return;
+    if (!meta?.url) return;
     try {
       const body = await wc.debugger.sendCommand("Network.getResponseBody", { requestId: params.requestId });
       const raw = body.base64Encoded ? Buffer.from(body.body, "base64").toString("utf8") : body.body;
       const text = String(raw || "").trim();
       if (!text.startsWith("{") && !text.startsWith("[")) {
-        traceNet(url, "notjson");
+        traceNet(meta.url, "notjson");
         return;
       }
-      ingestPayload(url, parseDouyinJson(text) || JSON.parse(text));
+      ingestPayload(meta.url, parseDouyinJson(text) || JSON.parse(text), meta.cursor);
     } catch {
       /* ignore non-json */
     }
@@ -339,7 +348,7 @@ function ensureFolder(name, id) {
   return folder;
 }
 
-function ingestPayload(url, json) {
+function ingestPayload(url, json, cursorHint) {
   if (isFolderListUrl(url)) {
     const data = json.data || json;
     const list = data.collects_list || data.list || json.collects_list;
@@ -374,11 +383,12 @@ function ingestPayload(url, json) {
   const collectsMatch = String(url).match(/collects_id=(\d+)/);
   const feedId = String(collectsMatch?.[1] || root?.collects_id_str || root?.collects_id || "");
   const named = (readingFolderName || "收藏") !== "收藏";
+  const cur = cursorHint || requestCursor(url);
   if (named && isFolderFeed) {
     if (!readingInside) {
-      feedBuffer.push({ url, json, feedId, at: Date.now() });
+      feedBuffer.push({ url, json, feedId, at: Date.now(), cursor: cur });
       if (feedBuffer.length > 24) feedBuffer.shift();
-      traceNet(url, "buf");
+      traceNet(url, cur && cur !== "0" ? `buf-c${cur}` : "buf");
       return;
     }
     if (!readingCollectsId && feedId) readingCollectsId = feedId;
@@ -390,6 +400,11 @@ function ingestPayload(url, json) {
       traceNet(url, "no-id");
       return;
     }
+    if (cur && cur !== "0" && !seenZeroCursor) {
+      traceNet(url, `late-cursor:${cur}`);
+      return;
+    }
+    if (!cur || cur === "0") seenZeroCursor = true;
   }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
@@ -446,14 +461,14 @@ function ingestPayload(url, json) {
 function replayFolderBuffer() {
   const recent = feedBuffer.filter((x) => Date.now() - x.at < 25000);
   feedBuffer = [];
-  let pick = [];
-  if (readingCollectsId) pick = recent.filter((x) => !x.feedId || sameCollectsId(x.feedId, readingCollectsId));
-  else if (recent.length) {
-    pick = recent.slice(-1);
+  let pick = recent.filter((x) => !x.cursor || x.cursor === "0");
+  if (readingCollectsId) pick = pick.filter((x) => !x.feedId || sameCollectsId(x.feedId, readingCollectsId));
+  else if (pick.length) {
+    pick = pick.slice(-1);
     if (pick[0]?.feedId) readingCollectsId = pick[0].feedId;
   }
   readingInside = true;
-  for (const item of pick) ingestPayload(item.url, item.json);
+  for (const item of pick) ingestPayload(item.url, item.json, item.cursor);
 }
 
 async function snapshotWorks() {
@@ -672,6 +687,7 @@ async function waitFolderVideoList(win, collectsId, timeoutMs) {
     const hit = feedBuffer.find((f) => {
       const list = /collects\/(video|aweme|item)\/list/i.test(f.url || "");
       if (!list) return false;
+      if (f.cursor && f.cursor !== "0") return false;
       if (id && f.feedId) return sameCollectsId(f.feedId, id);
       if (!id && f.feedId) return true;
       return false;
@@ -1008,6 +1024,9 @@ async function harvestMcp(win, ctx) {
     return 0;
   }
 
+  await scrollGridTop(win);
+  await sleep(700);
+
   try {
     const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
     if (pageId && (!readingCollectsId || sameCollectsId(pageId, readingCollectsId))) readingCollectsId = String(pageId);
@@ -1040,6 +1059,19 @@ async function harvestMcp(win, ctx) {
   readingInside = true;
   replayFolderBuffer();
   await drainPageFeeds(win);
+  if (!seenZeroCursor) {
+    noteHarvest("不是从第一条开始");
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: ctx.max || 1,
+      message: `「${ctx.folderName}」列表没从第一条开始，改用接口读首页`,
+    });
+    for (const id of [...seenThisRead]) captured.delete(id);
+    seenThisRead.clear();
+    harvestIdOrder = [];
+    return 0;
+  }
   const got = await harvestByIntercept(win, ctx);
   if (!got) noteHarvest(`拦包0条 collects/video/list id=${readingCollectsId || "?"}`);
   return got;
@@ -1760,6 +1792,7 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
           : Math.max(0, Number(opts.startListIndex) || 0);
       readingOrderStart = readingOrder;
       harvestIdOrder = [];
+      seenZeroCursor = false;
       refreshReading = true;
       await sleep(1200);
       await scrollUntilCap(win, {
