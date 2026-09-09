@@ -184,6 +184,10 @@ export const OPEN_FAVORITE_SCRIPT = `(() => {
   return "clicked";
 })()`;
 
+export const FAVORITE_ALL_URL = "https://www.douyin.com/user/self?from_tab_name=main&showTab=favorite";
+export const FAVORITE_FOLDER_LIST_URL =
+  "https://www.douyin.com/user/self?from_tab_name=main&showTab=favorite_collection&showSubTab=favorite_folder";
+
 export const CLICK_FOLDER_TAB_SCRIPT = `(() => {
   const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
   const vis = (el) => {
@@ -217,9 +221,14 @@ export const FOLDER_LIST_READY_SCRIPT = `(() => {
   const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
   const vis = (el) => {
     const r = el.getBoundingClientRect();
-    return r.width > 8 && r.height > 8 && r.left < 460 && r.top > 70 && r.bottom < innerHeight;
+    return r.width > 8 && r.height > 8 && r.bottom > 0 && r.top < innerHeight;
   };
-  return [...document.querySelectorAll("span, div, button, a, p")].some((el) => vis(el) && textOf(el).includes("新建收藏夹"));
+  const hasNew = [...document.querySelectorAll("span, div, button, a, p")].some((el) => vis(el) && textOf(el).includes("新建收藏夹"));
+  const cards = [...document.querySelectorAll("div, section, a, li")].filter((el) => {
+    const t = textOf(el);
+    return vis(el) && /共\\d+作品/.test(t) && t.length < 48;
+  });
+  return Boolean(hasNew && cards.length >= 1);
 })()`;
 
 export const LOCATE_FOLDER_TAB_SCRIPT = `(() => {

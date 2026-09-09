@@ -7,7 +7,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, FOLDER_LIST_READY_SCRIPT, LOCATE_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, FOLDER_LIST_READY_SCRIPT, LOCATE_FOLDER_TAB_SCRIPT, FAVORITE_ALL_URL, FAVORITE_FOLDER_LIST_URL, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
 import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, requestCursor, requestCollectsId, isZeroCursor, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -885,10 +885,7 @@ async function currentHref(win) {
 }
 
 async function waitPageReady(win, folderName = "收藏") {
-  const target =
-    folderName === "收藏"
-      ? "https://www.douyin.com/user/self?showTab=favorite"
-      : "https://www.douyin.com/user/self?showTab=favorite_collection";
+  const target = folderName === "收藏" ? FAVORITE_ALL_URL : FAVORITE_FOLDER_LIST_URL;
   send("cangxia:progress", {
     active: true,
     current: 0,
@@ -899,7 +896,7 @@ async function waitPageReady(win, folderName = "收藏") {
   const need =
     folderName === "收藏"
       ? !/showTab=favorite(?!_collection)/i.test(href) && !/showTab=favorite(&|$)/i.test(href)
-      : !/favorite_collection/i.test(href);
+      : !/showSubTab=favorite_folder/i.test(href);
   if (!/\/user\/self/i.test(href) || need) {
     await win.loadURL(target, { userAgent: CHROME_UA });
     await sleep(2800);
@@ -936,8 +933,8 @@ async function harvestFolderNames(win) {
     message: "正在读取自建收藏夹名单，等收藏夹卡片出现",
   });
   const href = await currentHref(win);
-  if (!/favorite_collection|favorite/i.test(href)) {
-    await win.loadURL("https://www.douyin.com/user/self?showTab=favorite_collection", { userAgent: CHROME_UA });
+  if (!/showSubTab=favorite_folder/i.test(href)) {
+    await win.loadURL(FAVORITE_FOLDER_LIST_URL, { userAgent: CHROME_UA });
     await sleep(4000);
   }
   try {
@@ -1012,7 +1009,7 @@ async function harvestMcp(win, ctx) {
     message: `打开收藏夹列表，再点「${ctx.folderName}」`,
   });
   try {
-    await win.loadURL("https://www.douyin.com/user/self?showTab=favorite_collection", { userAgent: CHROME_UA });
+    await win.loadURL(FAVORITE_FOLDER_LIST_URL, { userAgent: CHROME_UA });
     await sleep(2800);
   } catch {
     await mcpClickFavorite(win);
@@ -1824,10 +1821,7 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   refreshReading = false;
   const max = Math.max(1, Number(settings.maxPerRefresh) || 300);
   const folderName = String(opts.folderName || "收藏").trim() || "收藏";
-  const startUrl =
-    folderName === "收藏"
-      ? "https://www.douyin.com/user/self?showTab=favorite"
-      : "https://www.douyin.com/user/self?showTab=favorite_collection";
+  const startUrl = folderName === "收藏" ? FAVORITE_ALL_URL : FAVORITE_FOLDER_LIST_URL;
   const win = openDouyinWindow(startUrl, { forRefresh: true });
   void attachNetwork(win);
   openProgressWindow();
@@ -1871,7 +1865,7 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
 ipcMain.handle("cangxia:list-folders", async () => {
   refreshStop = false;
   refreshPaused = false;
-  const win = openDouyinWindow("https://www.douyin.com/user/self?showTab=favorite_collection", { forRefresh: true });
+  const win = openDouyinWindow(FAVORITE_FOLDER_LIST_URL, { forRefresh: true });
   void attachNetwork(win);
   openProgressWindow();
   send("cangxia:progress", {
