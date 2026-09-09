@@ -58,15 +58,15 @@ test("mapAweme album picks non-watermark url", () => {
   assert.deepEqual(work.hashtags, ["静物"]);
 });
 
-test("mapAweme album prefers download_url_list and ignores slideshow video", () => {
+test("mapAweme album skips download_url_list watermark and uses url_list", () => {
   const work = mapAweme(
     {
       aweme_id: "note1",
       aweme_type: 68,
       desc: "懒得说话的图文作品 #穹妹",
       images: [
-        { download_url_list: ["https://hd/1.jpg"], url_list: ["https://x/watermark/a.jpg"] },
-        { download_url_list: ["https://hd/2.jpg"], url_list: ["https://x/watermark/b.jpg"] },
+        { download_url_list: ["https://x/save-wm/1.jpg"], url_list: ["https://x/origin/1.jpg"] },
+        { download_url_list: ["https://x/save-wm/2.jpg"], url_list: ["https://x/origin/2.jpg"] },
       ],
       video: { play_addr: { url_list: ["https://x/slideshow.mp4"] } },
       author: { nickname: "懒得说话的", unique_id: "lan" },
@@ -76,8 +76,23 @@ test("mapAweme album prefers download_url_list and ignores slideshow video", () 
   assert.equal(work.kind, "album");
   assert.equal(work.images.length, 2);
   assert.equal(work.videos.length, 0);
+  assert.equal(work.images[0].url, "https://x/origin/1.jpg");
+  assert.equal(work.images[1].url, "https://x/origin/2.jpg");
+});
+
+test("mapAweme album uses img_bitrate highest gear", () => {
+  const work = mapAweme(
+    {
+      aweme_id: "note2",
+      aweme_type: 68,
+      desc: "高清",
+      images: [{ url_list: ["https://low/1.jpg"], width: 100, height: 100 }],
+      img_bitrate: [{ images: [{ url_list: ["https://hd/1.jpg"], width: 1440, height: 1920 }] }],
+      author: { nickname: "a", unique_id: "b" },
+    },
+    { id: "default", name: "收藏" },
+  );
   assert.equal(work.images[0].url, "https://hd/1.jpg");
-  assert.equal(work.images[1].url, "https://hd/2.jpg");
 });
 
 test("mapAweme video keeps still and highest bit_rate", () => {

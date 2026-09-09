@@ -1780,6 +1780,7 @@ ipcMain.handle("cangxia:download", async (_e, payload) => {
         name: `图${i + 1}.jpg`,
         type: "image",
         url: img.url,
+        urls: img.urls || [img.url],
         status: "waiting",
       })),
       ...((work.videos?.length ? work.videos : work.videoUrl ? [{ id: `${work.id}_v`, url: work.videoUrl }] : []) || [])

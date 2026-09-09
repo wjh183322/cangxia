@@ -68,22 +68,73 @@ function videoUrl(video) {
   return videoCandidates(video)[0] || "";
 }
 
-function imageUrl(img) {
-  if (!img || typeof img !== "object") return "";
-  const lists = [
-    img.download_url_list,
+function looksWatermarked(url) {
+  return /watermark|playwm|owner_watermark|tplv-dy-download|from=download/i.test(String(url || ""));
+}
+
+function unwatermarkImageUrl(url) {
+  return String(url || "")
+    .replace(/~tplv-[^/?#]+/gi, "~noop")
+    .replace(/watermark=1/g, "watermark=0");
+}
+
+function pushImageUrls(out, list) {
+  if (!Array.isArray(list)) return;
+  for (const raw of list) {
+    if (typeof raw !== "string" || !raw) continue;
+    const u = unwatermarkImageUrl(raw);
+    if (!u || out.includes(u)) continue;
+    if (looksWatermarked(u)) continue;
+    out.push(u);
+  }
+  for (const raw of list) {
+    if (typeof raw !== "string" || !raw) continue;
+    const u = unwatermarkImageUrl(raw);
+    if (u && !out.includes(u)) out.push(u);
+  }
+}
+
+function imageCandidates(img) {
+  if (!img || typeof img !== "object") return [];
+  const out = [];
+  // download_url_list 是 App 保存图，会带「抖音号」水印，放到最后
+  for (const list of [
     img.origin_url?.url_list,
     img.origin_large?.url_list,
-    img.display_image?.download_url_list,
-    img.display_image?.url_list,
     img.largest?.url_list,
+    img.display_image?.url_list,
     img.url_list,
-  ];
-  for (const list of lists) {
-    const url = pickUrl(list);
-    if (url) return url;
+  ]) {
+    pushImageUrls(out, list);
   }
-  return "";
+  pushImageUrls(out, img.download_url_list);
+  pushImageUrls(out, img.display_image?.download_url_list);
+  return out;
+}
+
+function imageUrl(img) {
+  return imageCandidates(img)[0] || "";
+}
+
+function albumPosts(aweme) {
+  const base =
+    (Array.isArray(aweme.images) && aweme.images.length && aweme.images) ||
+    aweme.image_post_info?.images ||
+    [];
+  const gears = [...(aweme.img_bitrate || []), ...(aweme.image_post_info?.img_bitrate || [])];
+  let best = [];
+  let score = -1;
+  for (const g of gears) {
+    const imgs = g?.images || [];
+    if (!imgs.length) continue;
+    const px = imgs.reduce((s, i) => s + (Number(i.width) || 0) * (Number(i.height) || 0), 0);
+    if (px > score || (px === score && imgs.length > best.length)) {
+      score = px;
+      best = imgs;
+    }
+  }
+  if (best.length >= base.length && best.length) return best;
+  return base;
 }
 
 function coverUrl(video) {
@@ -108,16 +159,13 @@ function hashtagsFrom(aweme) {
 
 function mediaFrom(aweme) {
   const id = aweme.aweme_id || aweme.id || "";
-  const posts =
-    (Array.isArray(aweme.images) && aweme.images.length && aweme.images) ||
-    aweme.image_post_info?.images ||
-    [];
+  const posts = albumPosts(aweme);
   const isNote = posts.length > 0 || [2, 68, 107, 151].includes(Number(aweme.aweme_type));
   const images = [];
   const videos = [];
   for (const [i, img] of posts.entries()) {
-    const still = imageUrl(img);
-    if (still) images.push({ id: `${id}_${i}`, url: still });
+    const stills = imageCandidates(img);
+    if (stills.length) images.push({ id: `${id}_${i}`, url: stills[0], urls: stills });
     const clips = videoCandidates(img.video);
     const live = clips[0] || pickUrl(img.clip?.url_list || [], "video");
     if (live) videos.push({ id: `${id}_v${i}`, url: live, urls: clips.length ? clips : [live] });
