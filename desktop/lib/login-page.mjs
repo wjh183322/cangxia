@@ -185,30 +185,60 @@ export const OPEN_FAVORITE_SCRIPT = `(() => {
 })()`;
 
 export const CLICK_FOLDER_TAB_SCRIPT = `(() => {
-  const byId = document.querySelector("#semiTabfavorite_collection") || document.querySelector("[id*='favorite_collection']");
-  if (byId) {
-    byId.click();
-    return "clicked-id";
-  }
   const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
   const vis = (el) => {
     const r = el.getBoundingClientRect();
-    return r.width > 8 && r.height > 8 && r.bottom > 0 && r.top < innerHeight;
+    return r.width > 8 && r.height > 8 && r.bottom > 0 && r.top < innerHeight && r.width < 220 && r.height < 64;
   };
-  const nodes = [...document.querySelectorAll("span, div, a, button, p, li")];
+  const nodes = [...document.querySelectorAll("span, div, a, button, p, li, [role='tab']")];
   const video = nodes.find((el) => vis(el) && textOf(el) === "视频" && el.childElementCount <= 4);
   const vr = video ? video.getBoundingClientRect() : null;
   const hits = nodes.filter((el) => {
     if (!vis(el) || textOf(el) !== "收藏夹" || el.childElementCount > 6) return false;
     const r = el.getBoundingClientRect();
-    if (vr && Math.abs(r.top - vr.top) < 36 && r.left < vr.left) return true;
-    if (!vr && r.top > 140 && r.top < 480) return true;
+    if (vr && Math.abs(r.top - vr.top) < 44) return true;
+    if (!vr && r.top > 140 && r.top < 520 && r.left < 760) return true;
     return false;
   });
   hits.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-  if (!hits[0]) return "none";
-  (hits[0].closest("a, button, [role='tab']") || hits[0]).click();
-  return "clicked";
+  if (hits[0]) {
+    (hits[0].closest("a, button, [role='tab']") || hits[0]).click();
+    return "clicked-text";
+  }
+  const byId = document.querySelector("#semiTabfavorite_collection") || document.querySelector("[id*='favorite_collection']");
+  if (byId) {
+    byId.click();
+    return "clicked-id";
+  }
+  return "none";
+})()`;
+
+export const FOLDER_LIST_READY_SCRIPT = `(() => {
+  const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
+  const vis = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 8 && r.height > 8 && r.left < 460 && r.top > 70 && r.bottom < innerHeight;
+  };
+  return [...document.querySelectorAll("span, div, button, a, p")].some((el) => vis(el) && textOf(el).includes("新建收藏夹"));
+})()`;
+
+export const LOCATE_FOLDER_TAB_SCRIPT = `(() => {
+  const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
+  const vis = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 8 && r.height > 8 && r.bottom > 0 && r.top < innerHeight && r.width < 220 && r.height < 64;
+  };
+  const nodes = [...document.querySelectorAll("span, div, a, button, p, li, [role='tab']")];
+  const video = nodes.find((el) => vis(el) && textOf(el) === "视频" && el.childElementCount <= 4);
+  const vr = video ? video.getBoundingClientRect() : null;
+  const hits = nodes.filter((el) => vis(el) && textOf(el) === "收藏夹" && el.childElementCount <= 6);
+  const row = hits.find((el) => {
+    const r = el.getBoundingClientRect();
+    return vr ? Math.abs(r.top - vr.top) < 44 : r.top > 140 && r.top < 520;
+  }) || hits[0];
+  if (!row) return { x: 0, y: 0 };
+  const r = row.getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
 })()`;
 
 export function normalizeFolderText(s) {

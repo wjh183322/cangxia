@@ -7,8 +7,8 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
-import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, requestCursor, isZeroCursor, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, FOLDER_LIST_READY_SCRIPT, LOCATE_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
+import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, requestCursor, requestCollectsId, isZeroCursor, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PARTITION = "persist:cangxia-douyin";
@@ -259,7 +259,7 @@ async function attachNetwork(win) {
     /* already attached */
   }
   try {
-    await wc.debugger.sendCommand("Network.enable");
+    await wc.debugger.sendCommand("Network.enable", { maxPostDataSize: 65536 });
   } catch {
     return;
   }
@@ -270,7 +270,13 @@ async function attachNetwork(win) {
       const req = params.request || {};
       const url = req.url || "";
       if (!isHarvestUrl(url)) return;
-      pending.set(params.requestId, { url, cursor: requestCursor(url, req.postData || "") });
+      const post = req.postData || "";
+      pending.set(params.requestId, {
+        url,
+        post,
+        needPost: Boolean(req.hasPostData && !post),
+        cursor: requestCursor(url, post),
+      });
       return;
     }
     if (method === "Network.responseReceived") {
@@ -295,6 +301,16 @@ async function attachNetwork(win) {
     const meta = pending.get(params.requestId);
     pending.delete(params.requestId);
     if (!meta?.url) return;
+    let post = meta.post || "";
+    if (meta.needPost) {
+      try {
+        const pd = await wc.debugger.sendCommand("Network.getRequestPostData", { requestId: params.requestId });
+        post = pd.postData || post;
+      } catch {
+        /* ignore */
+      }
+    }
+    const cursor = requestCursor(meta.url, post);
     try {
       const body = await wc.debugger.sendCommand("Network.getResponseBody", { requestId: params.requestId });
       const raw = body.base64Encoded ? Buffer.from(body.body, "base64").toString("utf8") : body.body;
@@ -303,7 +319,7 @@ async function attachNetwork(win) {
         traceNet(meta.url, "notjson");
         return;
       }
-      ingestPayload(meta.url, parseDouyinJson(text) || JSON.parse(text), meta.cursor);
+      ingestPayload(meta.url, parseDouyinJson(text) || JSON.parse(text), cursor, post);
     } catch {
       /* ignore non-json */
     }
@@ -348,7 +364,7 @@ function ensureFolder(name, id) {
   return folder;
 }
 
-function ingestPayload(url, json, cursorHint) {
+function ingestPayload(url, json, cursorHint, postHint = "") {
   if (isFolderListUrl(url)) {
     const data = json.data || json;
     const list = data.collects_list || data.list || json.collects_list;
@@ -381,12 +397,13 @@ function ingestPayload(url, json, cursorHint) {
   }
   const root = json.data || json;
   const collectsMatch = String(url).match(/collects_id=(\d+)/);
-  const feedId = String(collectsMatch?.[1] || root?.collects_id_str || root?.collects_id || "");
+  const feedId = String(collectsMatch?.[1] || requestCollectsId(url, postHint) || root?.collects_id_str || root?.collects_id || "");
   const named = (readingFolderName || "收藏") !== "收藏";
-  const cur = cursorHint || requestCursor(url);
+  const cur = cursorHint || requestCursor(url, postHint);
+  const unknownPost = Boolean(postHint === "" && /collects\/(video|aweme|item)\/list/i.test(url) && !/[?&]cursor=/i.test(url));
   if (named && isFolderFeed) {
     if (!readingInside) {
-      feedBuffer.push({ url, json, feedId, at: Date.now(), cursor: cur });
+      feedBuffer.push({ url, json, feedId, at: Date.now(), cursor: cur, post: postHint });
       if (feedBuffer.length > 24) feedBuffer.shift();
       traceNet(url, cur && cur !== "0" ? `buf-c${cur}` : "buf");
       return;
@@ -396,15 +413,15 @@ function ingestPayload(url, json, cursorHint) {
       traceNet(url, `id-mismatch:${feedId}`);
       return;
     }
-    if (readingCollectsId && !feedId) {
-      traceNet(url, "no-id");
-      return;
-    }
     if (cur && cur !== "0" && !seenZeroCursor) {
       traceNet(url, `late-cursor:${cur}`);
       return;
     }
-    if (!cur || cur === "0") seenZeroCursor = true;
+    if (!isZeroCursor(url, postHint, unknownPost) && !seenZeroCursor) {
+      traceNet(url, "late-cursor:unknown");
+      return;
+    }
+    if (isZeroCursor(url, postHint, false) || cur === "0") seenZeroCursor = true;
   }
   if (root && Object.prototype.hasOwnProperty.call(root, "has_more")) {
     readingHasMore = Boolean(Number(root.has_more));
@@ -468,7 +485,7 @@ function replayFolderBuffer() {
     if (pick[0]?.feedId) readingCollectsId = pick[0].feedId;
   }
   readingInside = true;
-  for (const item of pick) ingestPayload(item.url, item.json, item.cursor);
+  for (const item of pick) ingestPayload(item.url, item.json, item.cursor, item.post);
 }
 
 async function snapshotWorks() {
@@ -662,6 +679,39 @@ async function mcpClickFavorite(win) {
     await sleep(700);
   }
   return "none";
+}
+
+async function waitFolderListVisible(win, timeoutMs = 25000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    if (refreshStop || !win || win.isDestroyed()) return false;
+    let ready = false;
+    try {
+      ready = Boolean(await win.webContents.executeJavaScript(FOLDER_LIST_READY_SCRIPT));
+    } catch {
+      ready = false;
+    }
+    if (ready) return true;
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: 1,
+      message: "请点「收藏夹」子标签（视频旁边），等到左侧出现「新建收藏夹」",
+    });
+    try {
+      await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+    } catch {
+      /* ignore */
+    }
+    try {
+      const loc = await win.webContents.executeJavaScript(LOCATE_FOLDER_TAB_SCRIPT);
+      if (loc?.x) mouseClick(win, loc.x, loc.y);
+    } catch {
+      /* ignore */
+    }
+    await sleep(900);
+  }
+  return false;
 }
 
 async function mcpClickFolderTab(win) {
@@ -963,7 +1013,7 @@ async function harvestMcp(win, ctx) {
   });
   try {
     await win.loadURL("https://www.douyin.com/user/self?showTab=favorite_collection", { userAgent: CHROME_UA });
-    await sleep(3500);
+    await sleep(2800);
   } catch {
     await mcpClickFavorite(win);
     await sleep(2500);
@@ -973,9 +1023,18 @@ async function harvestMcp(win, ctx) {
   } catch {
     /* ignore */
   }
-  const tab = await mcpClickFolderTab(win);
-  await sleep(2500);
-  await drainPageFeeds(win);
+  const listReady = await waitFolderListVisible(win, 28000);
+  if (!listReady) {
+    noteHarvest("没打开收藏夹列表");
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: ctx.max || 1,
+      message: "左侧没有「新建收藏夹」，没进收藏夹列表",
+    });
+    return 0;
+  }
+  const tab = "list-ready";
 
   const expectedId = folderIdByName(ctx.folderName);
   readingCollectsId = expectedId || "";
@@ -1189,7 +1248,7 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
     const res = await doRequest(win, {
       method: "GET",
       path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
-      query: { collects_id: id, cursor: String(cursor), count: String(Math.max(10, Number(max) || 10)) },
+      query: { collects_id: id, cursor: String(cursor), count: "10" },
     });
     if (!jsonOk(res.json)) {
       noteHarvest(`${res.status} ${res.json?.status_code ?? ""} ${res.json?.status_msg || res.text || ""}`);

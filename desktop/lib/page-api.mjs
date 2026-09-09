@@ -28,9 +28,18 @@ export function requestCursor(url, post = "") {
   return m ? String(m[1]) : "";
 }
 
-export function isZeroCursor(url, post = "") {
+export function requestCollectsId(url, post = "") {
+  const s = `${url}\n${post}`;
+  const m = s.match(/collects_id=(\d+)/i) || s.match(/["']collects_id["']\s*[:=]\s*["']?(\d+)/i);
+  return m ? String(m[1]) : "";
+}
+
+export function isZeroCursor(url, post = "", unknownPost = false) {
   const c = requestCursor(url, post);
-  return !c || c === "0";
+  if (c === "0") return true;
+  if (c) return false;
+  if (unknownPost) return false;
+  return true;
 }
 
 export function commonQuery(extra = {}) {

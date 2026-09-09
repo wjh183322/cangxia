@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, requestCursor, isZeroCursor, nextCursor, signUrlScript, PAGE_TOKENS_SCRIPT } from "./page-api.mjs";
+import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, requestCursor, requestCollectsId, isZeroCursor, nextCursor, signUrlScript, PAGE_TOKENS_SCRIPT } from "./page-api.mjs";
 
 test("parseCollectsList reads collects_id and name", () => {
   const list = parseCollectsList({
@@ -29,7 +29,9 @@ test("requestCursor reads first page as zero", () => {
   assert.equal(isZeroCursor("https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=1&cursor=0"), true);
   assert.equal(isZeroCursor("https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=1"), true);
   assert.equal(isZeroCursor("https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=1&cursor=12"), false);
+  assert.equal(isZeroCursor("https://x/collects/video/list/", "", true), false);
   assert.equal(requestCursor("https://x", "cursor=12&count=10"), "12");
+  assert.equal(requestCollectsId("https://x", "collects_id=7598218830082496315&cursor=0"), "7598218830082496315");
 });
 
 test("signUrlScript includes ticket-guard headers", () => {
