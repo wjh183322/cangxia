@@ -185,6 +185,11 @@ export const OPEN_FAVORITE_SCRIPT = `(() => {
 })()`;
 
 export const CLICK_FOLDER_TAB_SCRIPT = `(() => {
+  const byId = document.querySelector("#semiTabfavorite_collection") || document.querySelector("[id*='favorite_collection']");
+  if (byId) {
+    byId.click();
+    return "clicked-id";
+  }
   const textOf = (el) => (el.innerText || el.textContent || "").replace(/\\s+/g, "");
   const vis = (el) => {
     const r = el.getBoundingClientRect();
@@ -233,6 +238,27 @@ export function validFolderName(name) {
     return false;
   }
   return true;
+}
+
+export function mcpClickExactNameScript(name) {
+  return `(() => {
+    const want = ${JSON.stringify(name)};
+    const vis = (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 8 && r.height > 8 && r.bottom > 0 && r.top < innerHeight;
+    };
+    const textOf = (el) => (el.innerText || "").replace(/\\s+/g, " ").trim();
+    const nodes = [...document.querySelectorAll("span, div, p, a, li")];
+    for (const el of nodes) {
+      if (!vis(el) || el.childElementCount > 8) continue;
+      const t = textOf(el);
+      if (t !== want) continue;
+      const r = el.getBoundingClientRect();
+      (el.closest("a, button, [role='button'], li") || el).click();
+      return { how: "mcp", x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    }
+    return { how: "none", x: 0, y: 0 };
+  })()`;
 }
 
 export function clickFolderSideScript(name) {

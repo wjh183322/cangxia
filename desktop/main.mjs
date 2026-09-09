@@ -7,7 +7,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, clickFolderCardScript, clickFolderSideScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
 import { commonQuery, parseCollectsList, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -580,8 +580,9 @@ async function scrollGridTop(win) {
 
 async function wheelBurst(win) {
   const wc = win.webContents;
-  let x = 760;
-  let y = 520;
+  // 与 douyin-favorites-mcp 相同：先把鼠标移到作品区，滚轮才会落到格子上
+  let x = 640;
+  let y = 450;
   try {
     const pt = await wc.executeJavaScript(WORK_GRID_POINT_SCRIPT);
     if (pt?.x && pt?.y) {
@@ -589,27 +590,66 @@ async function wheelBurst(win) {
       y = pt.y;
     }
   } catch {
-    /* keep default */
+    /* keep MCP default 640,450 */
   }
   wc.sendInputEvent({ type: "mouseMove", x, y });
-  await sleep(80);
-  for (let i = 0; i < 4; i++) {
+  await sleep(200);
+  for (let i = 0; i < 6; i++) {
     if (refreshStop || !win || win.isDestroyed()) return;
-    try {
-      await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
-    } catch {
-      /* ignore */
-    }
     wc.sendInputEvent({
       type: "mouseWheel",
       x,
       y,
       deltaX: 0,
-      deltaY: 480,
+      deltaY: 2000,
       canScroll: true,
     });
+    await sleep(600);
+  }
+  await sleep(2000);
+}
+
+async function mcpClickFavorite(win) {
+  for (let i = 0; i < 6; i += 1) {
+    let r = "none";
+    try {
+      r = await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
+    } catch {
+      r = "none";
+    }
+    if (String(r).startsWith("clicked")) return r;
     await sleep(700);
   }
+  return "none";
+}
+
+async function mcpClickFolderTab(win) {
+  for (let i = 0; i < 6; i += 1) {
+    let r = "none";
+    try {
+      r = await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
+    } catch {
+      r = "none";
+    }
+    if (String(r).startsWith("clicked")) return r;
+    await sleep(700);
+  }
+  return "none";
+}
+
+async function waitFolderVideoList(win, collectsId, timeoutMs) {
+  const t0 = Date.now();
+  const id = String(collectsId || "");
+  while (Date.now() - t0 < timeoutMs) {
+    if (refreshStop || !win || win.isDestroyed()) return false;
+    await drainPageFeeds(win);
+    const hit = feedBuffer.some((f) => (id && f.feedId === id) || /collects\/video\/list/i.test(f.url || ""));
+    const net = netTrace.some((t) => /collects\/video\/list/i.test(t) && (!id || t.includes(id)));
+    if (hit || net || (id && readingCollectsId === id && captured.size)) return true;
+    if (countProgress(readingFolderId, readingFolderName, readingStarted) > 0) return true;
+    await sleep(400);
+  }
+  return false;
 }
 
 async function sessionCookie(name) {
@@ -851,97 +891,82 @@ async function harvestFolderNames(win) {
 }
 
 async function harvestMcp(win, ctx) {
-  if (ctx.folderName !== "收藏") {
+  if (ctx.folderName === "收藏") {
     send("cangxia:progress", {
       active: true,
       current: 0,
       total: ctx.max || 1,
-      message: `${ctx.label || "拦包"} 打开收藏夹列表，再点进「${ctx.folderName}」`,
+      message: `点「收藏」，拦 listcollection`,
     });
-    let tab = "url";
-    const href = await currentHref(win);
-    if (!/favorite_collection/i.test(href)) {
-      tab = "none";
-      for (let i = 0; i < 4; i += 1) {
-        try {
-          tab = await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
-        } catch {
-          tab = "none";
-        }
-        if (String(tab).startsWith("clicked")) break;
-        await sleep(700);
-      }
-      await sleep(String(tab).startsWith("clicked") ? 2800 : 800);
-    }
-    readingCollectsId = "";
-    readingInside = false;
-    feedBuffer = [];
-    const how = await openNamedFolder(win, ctx.folderName, { skipNav: true });
-    if (how === "none") {
-      let probe = { side: [], cards: [] };
-      try {
-        probe = await win.webContents.executeJavaScript(installFolderWatchScript(folders.map((f) => f.name)));
-      } catch {
-        /* ignore */
-      }
-      const side = (probe?.side || []).join("/") || "无";
-      const cards = (probe?.cards || []).map((c) => c.name || c).join("/") || "无";
-      noteHarvest(`没点进夹 tab=${tab} 侧栏:${side} 卡片:${cards}`.slice(0, 90));
-      send("cangxia:progress", {
-        active: true,
-        current: 0,
-        total: ctx.max || 1,
-        message: `${ctx.label || "拦包"} 没点进「${ctx.folderName}」`,
-      });
-      return 0;
-    }
+    await mcpClickFavorite(win);
+    await sleep(6000);
     readingInside = true;
-    try {
-      const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
-      if (pageId) readingCollectsId = String(pageId);
-    } catch {
-      /* ignore */
-    }
-    send("cangxia:progress", {
-      active: true,
-      current: 0,
-      total: ctx.max || 1,
-      message: `「${ctx.folderName}」滚回顶部，从第1条开始`,
-    });
-    const kept = [...feedBuffer];
-    await scrollGridTop(win);
-    harvestIdOrder = [];
-    await sleep(1600);
-    await drainPageFeeds(win);
-    if (!feedBuffer.length) feedBuffer = kept;
-    replayFolderBuffer();
-    await drainPageFeeds(win);
     const got = await harvestByIntercept(win, ctx);
-    if (!got) {
-      let res = [];
-      try {
-        res = await win.webContents.executeJavaScript(LIST_COLLECT_URLS_SCRIPT);
-      } catch {
-        res = [];
-      }
-      const collectish = netTrace.filter((t) => /collect|listcollection|favorite/i.test(t));
-      const used = (collectish.length ? collectish : netTrace).slice(-3);
-      noteHarvest(`拦包0条 ${(used.join("|") || "无net")}`.slice(0, 90));
-    }
+    if (!got) noteHarvest("拦包0条 listcollection");
     return got;
   }
-  const got = await harvestByIntercept(win, ctx);
-  if (!got) {
-    let res = [];
-    try {
-      res = await win.webContents.executeJavaScript(LIST_COLLECT_URLS_SCRIPT);
-    } catch {
-      res = [];
-    }
-    const collectish = netTrace.filter((t) => /collect|listcollection|favorite/i.test(t));
-    const used = (collectish.length ? collectish : netTrace).slice(-3);
-    noteHarvest(`拦包0条 ${(used.join("|") || "无net")}`.slice(0, 90));
+
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: ctx.max || 1,
+    message: `点「收藏」→「收藏夹」，再点「${ctx.folderName}」`,
+  });
+  await mcpClickFavorite(win);
+  await sleep(3000);
+  const tab = await mcpClickFolderTab(win);
+  await sleep(4000);
+  await drainPageFeeds(win);
+
+  const known = folderIdByName(ctx.folderName);
+  if (known && !String(known).startsWith("folder_")) readingCollectsId = String(known);
+
+  readingInside = false;
+  feedBuffer = [];
+  harvestIdOrder = [];
+
+  let mcpHit = { how: "none" };
+  try {
+    mcpHit = await win.webContents.executeJavaScript(mcpClickExactNameScript(ctx.folderName));
+  } catch {
+    mcpHit = { how: "none" };
   }
+  if (mcpHit?.how === "mcp" && mcpHit.x) mouseClick(win, mcpHit.x, mcpHit.y);
+  const how = await openNamedFolder(win, ctx.folderName, { skipNav: true });
+
+  try {
+    const pageId = await win.webContents.executeJavaScript(PAGE_COLLECTS_ID_SCRIPT);
+    if (pageId) readingCollectsId = String(pageId);
+  } catch {
+    /* ignore */
+  }
+
+  send("cangxia:progress", {
+    active: true,
+    current: 0,
+    total: ctx.max || 1,
+    message: `等「${ctx.folderName}」collects/video/list`,
+  });
+  const gotFeed = await waitFolderVideoList(win, readingCollectsId, 30000);
+  if (how === "none" && !gotFeed && mcpHit?.how === "none") {
+    noteHarvest(`没点进夹 tab=${tab}`);
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: ctx.max || 1,
+      message: `没点进「${ctx.folderName}」`,
+    });
+    return 0;
+  }
+  if (!readingCollectsId) {
+    const fromBuf = feedBuffer.find((f) => f.feedId);
+    if (fromBuf?.feedId) readingCollectsId = String(fromBuf.feedId);
+  }
+  readingInside = true;
+  replayFolderBuffer();
+  await drainPageFeeds(win);
+  const got = await harvestByIntercept(win, ctx);
+  if (!got) noteHarvest(`拦包0条 collects/video/list id=${readingCollectsId || "?"}`);
   return got;
 }
 
