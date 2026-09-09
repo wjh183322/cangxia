@@ -43,6 +43,7 @@ let readingOrderStart = 0;
 let harvestIdOrder = [];
 let seenThisRead = new Set();
 let awemePool = new Map();
+let gridOrderOnly = false;
 let readingCollectsId = "";
 let readingInside = false;
 let seenZeroCursor = false;
@@ -395,6 +396,10 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
     (/collects\/video\/list|collects\/aweme\/list|collects\/item\/list|\/web\/collects\//i.test(url) &&
       !/collects\/list\/?(?:\?|$)/i.test(url));
   poolAwemes(json);
+  if (gridOrderOnly) {
+    traceNet(url, "pool");
+    return;
+  }
   if (readingPattern === "listcollection" ? !isList : !isFolderFeed) {
     traceNet(url, isList ? "skip-总收藏" : "skip");
     return;
@@ -520,9 +525,7 @@ async function harvestFromGrid(win, ctx) {
   const folder = ensureFolder(ctx.folderName, readingCollectsId);
   const seen = new Set();
   let idle = 0;
-  await scrollGridTop(win);
-  await sleep(400);
-  while (win && !win.isDestroyed() && !refreshStop && seenThisRead.size < max && idle < 10) {
+  const snap = async () => {
     await drainPageFeeds(win);
     let cards = [];
     try {
@@ -545,6 +548,16 @@ async function harvestFromGrid(win, ctx) {
       total: max,
       message: `页面格子读「${ctx.folderName}」${seenThisRead.size}/${max}`,
     });
+    return fresh;
+  };
+  await scrollGridTop(win);
+  for (let i = 0; i < 4 && seenThisRead.size < max; i += 1) {
+    await sleep(280);
+    await scrollGridTop(win);
+    await snap();
+  }
+  while (win && !win.isDestroyed() && !refreshStop && seenThisRead.size < max && idle < 10) {
+    const fresh = await snap();
     if (seenThisRead.size >= max) break;
     if (!fresh) idle += 1;
     else idle = 0;
@@ -557,14 +570,9 @@ async function harvestFromGrid(win, ctx) {
 function replayFolderBuffer() {
   const recent = feedBuffer.filter((x) => Date.now() - x.at < 25000);
   feedBuffer = [];
-  let pick = recent;
-  if (readingCollectsId) pick = pick.filter((x) => !x.feedId || sameCollectsId(x.feedId, readingCollectsId));
-  else if (pick.length) {
-    pick = pick.slice(-1);
-    if (pick[0]?.feedId) readingCollectsId = pick[0].feedId;
+  for (const item of recent) {
+    if (item?.json) poolAwemes(item.json);
   }
-  readingInside = true;
-  for (const item of pick) ingestPayload(item.url, item.json, item.cursor, item.post);
 }
 
 async function snapshotWorks() {
@@ -1116,13 +1124,14 @@ async function harvestMcp(win, ctx) {
   const expectedId = folderIdByName(ctx.folderName);
   readingCollectsId = expectedId || "";
   harvestIdOrder = [];
-  readingInside = true;
+  readingInside = false;
   seenZeroCursor = true;
+  gridOrderOnly = true;
   send("cangxia:progress", {
     active: true,
     current: 0,
     total: ctx.max || 1,
-    message: `已监听，点进「${ctx.folderName}」收第一包`,
+    message: `已监听，点进「${ctx.folderName}」按封面墙顺序读`,
   });
 
   let mcpHit = { how: "none" };
@@ -1178,16 +1187,17 @@ async function harvestMcp(win, ctx) {
     const fromBuf = feedBuffer.find((f) => f.feedId);
     if (fromBuf?.feedId) readingCollectsId = String(fromBuf.feedId);
   }
+  gridOrderOnly = true;
+  readingInside = true;
   replayFolderBuffer();
   await drainPageFeeds(win);
-  if (seenThisRead.size < (ctx.max || 1)) {
-    const got = await harvestByIntercept(win, ctx);
-    if (got) return got;
+  try {
+    const fromGrid = await harvestFromGrid(win, ctx);
+    if (fromGrid) return fromGrid;
+  } finally {
+    gridOrderOnly = false;
   }
-  if (seenThisRead.size) return seenThisRead.size;
-  const fromGrid = await harvestFromGrid(win, ctx);
-  if (fromGrid) return fromGrid;
-  noteHarvest(`拦包0条 collects/video/list id=${readingCollectsId || "?"}`);
+  noteHarvest(`格子0条 collects/video/list id=${readingCollectsId || "?"}`);
   return 0;
 }
 

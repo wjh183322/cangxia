@@ -476,31 +476,41 @@ export const WORK_GRID_POINT_SCRIPT = `(() => {
 })()`;
 
 export const GRID_CARDS_SCRIPT = `(() => {
-  const cards = [...document.querySelectorAll("a[href*='/video/'], a[href*='/note/'], a[href*='/aweme/']")].filter((el) => {
+  const parse = (s) => {
+    const t = String(s || "");
+    const m = t.match(/\\/(video|note|aweme)\\/(\\d{5,})/) || t.match(/[?&](?:modal_id|aweme_id|item_id)=(\\d{5,})/);
+    if (!m) return null;
+    const id = m[2] || m[1];
+    if (!id) return null;
+    const kind = (m[1] === "video" || /\\/video\\//.test(t)) ? "video" : "album";
+    return { id, kind };
+  };
+  const nodes = [...document.querySelectorAll("a[href*='/video'], a[href*='/note'], a[href*='/aweme'], a[href*='modal_id']")];
+  const cards = nodes.filter((el) => {
     const r = el.getBoundingClientRect();
-    return r.width >= 90 && r.height >= 110 && r.left > 220;
+    return r.width >= 72 && r.height >= 90 && r.left > 180 && r.bottom > 90 && r.top < innerHeight - 8;
   });
   cards.sort((a, b) => {
     const ra = a.getBoundingClientRect();
     const rb = b.getBoundingClientRect();
-    if (Math.abs(ra.top - rb.top) > 48) return ra.top - rb.top;
+    if (Math.abs(ra.top - rb.top) > 40) return ra.top - rb.top;
     return ra.left - rb.left;
   });
   const out = [];
   const seen = new Set();
   for (const a of cards) {
     const href = a.getAttribute("href") || a.href || "";
-    const m = href.match(/\\/(video|note|aweme)\\/(\\d{5,})/);
-    if (!m || seen.has(m[2])) continue;
-    seen.add(m[2]);
+    const parsed = parse(href) || parse(a.getAttribute("data-e2e") || "") || parse(a.innerHTML);
+    if (!parsed || seen.has(parsed.id)) continue;
+    seen.add(parsed.id);
     const img = a.querySelector("img");
     const lines = String(a.innerText || "")
       .split("\\n")
       .map((t) => t.trim())
       .filter((t) => t && !/^\\d+$/.test(t) && !/^\\d+\\.\\d+[万w]?$/.test(t));
     out.push({
-      id: m[2],
-      kind: m[1] === "video" ? "video" : "album",
+      id: parsed.id,
+      kind: parsed.kind,
       cover: img?.currentSrc || img?.src || "",
       title: lines[lines.length - 1] || "",
     });
