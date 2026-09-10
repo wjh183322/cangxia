@@ -562,49 +562,25 @@ export const SCROLL_GRID_TOP_SCRIPT = `(() => {
 })()`;
 
 export const SCROLL_FEED_SCRIPT = `(() => {
-  const isScrollable = (el) => {
-    const st = getComputedStyle(el);
-    return (st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") && el.scrollHeight > el.clientHeight + 20;
-  };
   const cards = [...document.querySelectorAll("a[href*='/video'], a[href*='/note'], a[href*='/aweme']")].filter((el) => {
     const r = el.getBoundingClientRect();
     return r.width >= 100 && r.height >= 120 && r.left > 160 && r.bottom > 80 && r.top < innerHeight;
   });
   cards.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
   const last = cards[cards.length - 1];
-  const cx = last ? last.getBoundingClientRect().left + last.getBoundingClientRect().width / 2 : innerWidth * 0.58;
-  const cy = last ? Math.min(innerHeight - 40, last.getBoundingClientRect().top + last.getBoundingClientRect().height * 0.5) : innerHeight * 0.7;
-  const fire = (node, dy) => {
-    if (!node) return;
-    node.dispatchEvent(new WheelEvent("wheel", {
-      bubbles: true,
-      cancelable: true,
-      deltaY: dy,
-      deltaMode: 0,
-      clientX: cx,
-      clientY: cy,
-      view: window,
-    }));
-  };
-  fire(last, 1600);
-  fire(document.elementFromPoint(cx, cy), 1600);
-  fire(document, 1600);
-  fire(window, 1600);
-  let moved = 0;
-  const start = last || document.body;
-  let el = start && start.parentElement;
-  while (el && el !== document.documentElement) {
-    if (isScrollable(el)) {
-      const before = el.scrollTop;
-      el.scrollTop = Math.min(el.scrollHeight, el.scrollTop + Math.max(520, Math.floor(el.clientHeight * 0.9)));
-      if (el.scrollTop > before + 4) moved += 1;
-    }
-    el = el.parentElement;
-  }
-  const y0 = window.scrollY || document.documentElement.scrollTop;
-  window.scrollBy(0, 800);
-  const y1 = window.scrollY || document.documentElement.scrollTop;
-  return { cards: cards.length, moved, win: y1 > y0 + 2 ? "row" : moved ? "row" : "end" };
+  if (!last) return { cards: 0, how: "none" };
+  last.scrollIntoView({ block: "start", inline: "nearest", behavior: "instant" });
+  const r = last.getBoundingClientRect();
+  last.dispatchEvent(new WheelEvent("wheel", {
+    bubbles: true,
+    cancelable: true,
+    deltaY: 640,
+    deltaMode: 0,
+    clientX: r.left + r.width / 2,
+    clientY: Math.min(innerHeight - 24, r.top + r.height / 2),
+    view: window,
+  }));
+  return { cards: cards.length, how: "into" };
 })()`;
 
 export const LIST_SIDE_FOLDERS_SCRIPT = `(() => {

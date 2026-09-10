@@ -844,9 +844,13 @@ async function scrollGridTop(win) {
 
 async function wheelBurst(win) {
   const wc = win.webContents;
-  // 与 douyin-favorites-mcp 相同：先把鼠标移到作品区，滚轮才会落到格子上
-  let x = 640;
-  let y = 450;
+  try {
+    await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
+  } catch {
+    /* ignore */
+  }
+  let x = Math.round(640);
+  let y = Math.round(520);
   try {
     const pt = await wc.executeJavaScript(WORK_GRID_POINT_SCRIPT);
     if (pt?.x && pt?.y) {
@@ -854,11 +858,11 @@ async function wheelBurst(win) {
       y = pt.y;
     }
   } catch {
-    /* keep MCP default 640,450 */
+    /* keep */
   }
   wc.sendInputEvent({ type: "mouseMove", x, y });
-  await sleep(120);
-  for (let i = 0; i < 8; i++) {
+  await sleep(80);
+  for (let i = 0; i < 4; i++) {
     if (refreshStop || !win || win.isDestroyed()) return;
     try {
       const pt = await wc.executeJavaScript(WORK_GRID_POINT_SCRIPT);
@@ -875,17 +879,12 @@ async function wheelBurst(win) {
       x,
       y,
       deltaX: 0,
-      deltaY: 900,
+      deltaY: 360,
       canScroll: true,
     });
-    try {
-      await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
-    } catch {
-      /* ignore */
-    }
-    await sleep(220);
+    await sleep(240);
   }
-  await sleep(800);
+  await sleep(500);
 }
 
 async function mcpClickFavorite(win) {
