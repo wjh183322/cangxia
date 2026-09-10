@@ -354,19 +354,21 @@ export function clickFolderCardScript(name) {
     const nodes = [...document.querySelectorAll("div, a, span, li, section")];
     const cards = nodes.filter((el) => {
       const r = el.getBoundingClientRect();
-      if (r.width < 100 || r.height < 48 || r.width > 720) return false;
+      if (r.width < 140 || r.height < 80 || r.width > 900 || r.height > 900) return false;
+      if (r.bottom < 80 || r.top > innerHeight - 8) return false;
       const t = textOf(el);
-      if (t.length > 80) return false;
-      return t.includes(nw + "共") && /共\\d+作品/.test(t);
+      if (t.length > 120) return false;
+      return t.includes(nw) && /共\\d+作品/.test(t);
     });
     cards.sort((a, b) => textOf(a).length - textOf(b).length);
     if (cards[0]) {
+      const r = cards[0].getBoundingClientRect();
       (cards[0].closest("a, button, [role='button']") || cards[0]).click();
-      return "card:" + textOf(cards[0]).slice(0, 24);
+      return "card:" + textOf(cards[0]).slice(0, 24) + "@" + Math.round(r.left) + "," + Math.round(r.top);
     }
     const rows = nodes.filter((el) => {
       const r = el.getBoundingClientRect();
-      if (r.width < 48 || r.height < 20 || r.height > 100) return false;
+      if (r.width < 48 || r.height < 16 || r.height > 120) return false;
       const t = textOf(el);
       return t === nw || t.startsWith(nw);
     });
@@ -387,15 +389,15 @@ export function locateFolderCardScript(name) {
     const hits = [];
     for (const el of document.querySelectorAll("div, a, li, section")) {
       const r = el.getBoundingClientRect();
-      if (r.width < 120 || r.height < 64 || r.width > 720 || r.height > 420) continue;
-      if (r.bottom < 120 || r.top > innerHeight - 16) continue;
+      if (r.width < 140 || r.height < 80 || r.width > 900 || r.height > 900) continue;
+      if (r.bottom < 80 || r.top > innerHeight - 16) continue;
       const t = textOf(el);
-      if (t.length > 80) continue;
-      if (t.includes(nw + "共") && /共\\d+作品/.test(t)) {
+      if (t.length > 120) continue;
+      if (t.includes(nw) && /共\\d+作品/.test(t)) {
         hits.push({
           how: "card",
-          x: Math.round(r.left + Math.min(110, r.width * 0.35)),
-          y: Math.round(r.top + Math.min(100, r.height * 0.42)),
+          x: Math.round(r.left + Math.min(90, r.width * 0.28)),
+          y: Math.round(r.top + Math.min(70, r.height * 0.22)),
           len: t.length,
           area: r.width * r.height,
         });

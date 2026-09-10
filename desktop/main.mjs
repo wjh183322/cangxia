@@ -1514,15 +1514,12 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
         await sleep(700);
         continue;
       }
-      if (folderTotal && countProgress() < folderTotal && emptyStreak < 12) {
+      if (folderTotal && countProgress() < folderTotal && emptyStreak < 2) {
         cursor = Number(cursor) + pageSize;
-        await sleep(600);
+        await sleep(400);
         continue;
       }
-      if (emptyStreak >= 3 && (!folderTotal || countProgress() >= folderTotal || emptyStreak >= 6)) break;
-      cursor = Number(cursor) + pageSize;
-      await sleep(800);
-      continue;
+      break;
     }
     emptyStreak = 0;
     const next = nextCursor(res.json, cursor);
@@ -1539,17 +1536,13 @@ async function continueFolderInPage(win, { folderId, folderName, max, started })
   const id = String(readingCollectsId || folderIdByName(folderName) || "");
   readingInside = true;
   refreshReading = true;
-  if (id && !id.startsWith("folder_")) {
-    sendReadProgress(folderName, "，打开夹");
-    const url = `${FAVORITE_FOLDER_LIST_URL}&collects_id=${id}`;
-    try {
-      await loadAndWait(win, url);
-    } catch {
-      /* keep current page */
-    }
-  }
-  await openNamedFolder(win, folderName, { skipNav: true });
+  sendReadProgress(folderName, "，点进夹卡片");
+  const entered = await openNamedFolder(win, folderName, { skipNav: true });
   readingInside = true;
+  if (entered !== "in") {
+    sendReadProgress(folderName, "，没点进夹，再点一次");
+    await openNamedFolder(win, folderName, { skipNav: true });
+  }
   const folder = ensureFolder(folderName, id);
   let cursor = readingCursor || countProgress();
   let empty = 0;
@@ -1659,23 +1652,29 @@ async function openNamedFolder(win, folderName, { skipNav = false } = {}) {
     if (inside?.ok) return "in";
     let clicked = "none";
     try {
-      clicked = await win.webContents.executeJavaScript(clickFolderSideScript(folderName));
+      clicked = await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
     } catch {
       clicked = "none";
     }
     if (clicked === "none") {
       try {
-        clicked = await win.webContents.executeJavaScript(clickFolderCardScript(folderName));
+        const mcp = await win.webContents.executeJavaScript(mcpClickExactNameScript(folderName));
+        if (mcp?.how && mcp.how !== "none") {
+          clicked = "mcp";
+          if (mcp.x) mouseClick(win, mcp.x, mcp.y);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (clicked === "none") {
+      try {
+        clicked = await win.webContents.executeJavaScript(clickFolderSideScript(folderName));
       } catch {
         clicked = "none";
       }
     }
-    send("cangxia:progress", {
-      active: true,
-      current: 0,
-      total: 1,
-      message: `正在点进「${folderName}」${clicked && clicked !== "none" ? `（${clicked}）` : ""}`,
-    });
+    sendReadProgress(folderName, clicked && clicked !== "none" ? `，${String(clicked).slice(0, 24)}` : "，找卡片");
     let loc = { how: "none", x: 0, y: 0 };
     try {
       loc = await win.webContents.executeJavaScript(locateFolderCardScript(folderName));
