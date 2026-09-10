@@ -7,7 +7,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, FOLDER_LIST_READY_SCRIPT, LOCATE_FOLDER_TAB_SCRIPT, FAVORITE_ALL_URL, FAVORITE_FOLDER_LIST_URL, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, GRID_CARDS_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, CLOSE_NEW_FOLDER_DIALOG_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, FOLDER_LIST_READY_SCRIPT, LOCATE_FOLDER_TAB_SCRIPT, FAVORITE_ALL_URL, FAVORITE_FOLDER_LIST_URL, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, GRID_CARDS_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
 import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, requestCursor, requestCollectsId, isZeroCursor, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -842,55 +842,10 @@ async function scrollGridTop(win) {
   }
 }
 
-async function cdpClick(wc, x, y) {
-  const down = { type: "mousePressed", x, y, button: "left", clickCount: 1 };
-  const up = { type: "mouseReleased", x, y, button: "left", clickCount: 1 };
-  try {
-    await wc.debugger.sendCommand("Input.dispatchMouseEvent", down);
-    await wc.debugger.sendCommand("Input.dispatchMouseEvent", up);
-  } catch {
-    wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
-    wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
-  }
-}
-
-async function cdpKey(wc, key, code, vk) {
-  const payload = {
-    type: "keyDown",
-    key,
-    code,
-    windowsVirtualKeyCode: vk,
-    nativeVirtualKeyCode: vk,
-  };
-  try {
-    await wc.debugger.sendCommand("Input.dispatchKeyEvent", payload);
-    await wc.debugger.sendCommand("Input.dispatchKeyEvent", { ...payload, type: "keyUp" });
-  } catch {
-    wc.sendInputEvent({ type: "keyDown", keyCode: vk });
-    wc.sendInputEvent({ type: "keyUp", keyCode: vk });
-  }
-}
-
 async function wheelBurst(win) {
   const wc = win.webContents;
-  try {
-    if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
-  } catch {
-    /* already */
-  }
-  try {
-    await wc.executeJavaScript(CLOSE_NEW_FOLDER_DIALOG_SCRIPT);
-  } catch {
-    /* ignore */
-  }
-  win.focus();
-  try {
-    wc.focus();
-  } catch {
-    /* ignore */
-  }
-  let x = 520;
-  let y = 380;
+  let x = 640;
+  let y = 520;
   try {
     const pt = await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
     if (pt?.x && pt?.y) {
@@ -898,18 +853,59 @@ async function wheelBurst(win) {
       y = pt.y;
     }
   } catch {
-    /* keep */
+    try {
+      const pt = await wc.executeJavaScript(WORK_GRID_POINT_SCRIPT);
+      if (pt?.x && pt?.y) {
+        x = pt.x;
+        y = pt.y;
+      }
+    } catch {
+      /* keep */
+    }
   }
-  await cdpClick(wc, x, y);
-  await sleep(120);
-  await cdpClick(wc, x, y);
-  await sleep(160);
-  for (let i = 0; i < 10; i++) {
+  try {
+    if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
+  } catch {
+    /* already */
+  }
+  for (let i = 0; i < 6; i++) {
     if (refreshStop || !win || win.isDestroyed()) return;
-    await cdpKey(wc, "ArrowDown", "ArrowDown", 40);
-    await sleep(90);
+    try {
+      const pt = await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
+      if (pt?.x && pt?.y) {
+        x = pt.x;
+        y = pt.y;
+      }
+    } catch {
+      /* keep */
+    }
+    try {
+      await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x,
+        y,
+      });
+      await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
+        type: "mouseWheel",
+        x,
+        y,
+        deltaX: 0,
+        deltaY: 420,
+      });
+    } catch {
+      wc.sendInputEvent({ type: "mouseMove", x, y });
+      wc.sendInputEvent({
+        type: "mouseWheel",
+        x,
+        y,
+        deltaX: 0,
+        deltaY: -420,
+        canScroll: true,
+      });
+    }
+    await sleep(180);
   }
-  await sleep(280);
+  await sleep(400);
 }
 
 async function mcpClickFavorite(win) {
@@ -1745,8 +1741,8 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     return;
   }
   const steps = [
-    ["页面fetch", () => harvestVia(win, ctx, signedRequest)],
     ["拦页面", () => harvestMcp(win, ctx)],
+    ["页面fetch", () => harvestVia(win, ctx, signedRequest)],
   ];
   const tried = [];
   const addedSince = (before) => {
@@ -1783,28 +1779,17 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
       const before = new Set(captured.keys());
       await run();
       const added = addedSince(before);
-      const got = countProgress(folderId, folderName, started);
       if (added > 0) {
         tried.push(`${label} 读到${added}条`);
         lastHarvestMethod = tried.join(" → ");
-        lastHarvestCount = got;
+        lastHarvestCount = added;
         send("cangxia:progress", {
           active: true,
-          current: Math.min(got, max),
+          current: Math.min(added, max),
           total: max,
           message: lastHarvestMethod,
         });
-        if (got >= max || refreshStop) return;
-        const next = steps[i + 1];
-        if (!next) return;
-        send("cangxia:progress", {
-          active: true,
-          current: Math.min(got, max),
-          total: max,
-          message: `${lastHarvestMethod} → 不够 ${max}，接着${next[0]}`,
-        });
-        await sleep(600);
-        continue;
+        return;
       }
       tried.push(lastHarvestError ? `${label} 没过(${lastHarvestError})` : `${label} 没过`);
       lastHarvestMethod = tried.join(" → ");
