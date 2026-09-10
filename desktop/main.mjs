@@ -815,7 +815,7 @@ async function drainPageFeeds(win) {
   }
 }
 
-async function waitForNewItems(prevCount, timeoutMs, folderName) {
+async function waitForNewItems(prevCount, timeoutMs, folderName, prevSkip = 0) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs && !refreshStop) {
     const got = countProgress();
@@ -827,9 +827,10 @@ async function waitForNewItems(prevCount, timeoutMs, folderName) {
     });
     if (readingFolderTotal && got >= readingFolderTotal) return true;
     if (Number(readingMax) < 10000 && got >= Number(readingMax)) return true;
+    if (got > prevCount || skippedIds.size > prevSkip) return true;
     await sleep(200);
   }
-  return countProgress() > prevCount;
+  return countProgress() > prevCount || skippedIds.size > prevSkip;
 }
 
 async function openFavoriteFresh(win) {
@@ -1642,9 +1643,10 @@ async function harvestByIntercept(win, { folderId, folderName, max, started, fol
   const deadline = Date.now() + Math.min(20 * 60 * 1000, 120000 + remain * 500);
   const folderRef = folder || ensureFolder(folderName, readingCollectsId);
   sendReadProgress(folderName, "，夹里滚动");
+  await scrollGridTop(win);
   await drainPageFeeds(win);
   let got = countProgress();
-  if (got < max) await waitForNewItems(got, 8000, folderName);
+  if (got < max) await waitForNewItems(got, 8000, folderName, skippedIds.size);
   got = countProgress();
   if (got >= max || (readingFolderTotal && got >= readingFolderTotal)) return got;
   let idle = 0;
@@ -1665,15 +1667,17 @@ async function harvestByIntercept(win, { folderId, folderName, max, started, fol
     }
     await wheelBurst(win);
     await drainPageFeeds(win);
-    const grew = await waitForNewItems(before, 3500, folderName);
+    const grew = await waitForNewItems(before, 3500, folderName, skipBefore);
     await drainPageFeeds(win);
     got = countProgress();
     if (got >= max || (readingFolderTotal && got >= readingFolderTotal)) break;
-    if (grew || skippedIds.size > skipBefore || got > before) idle = 0;
+    const skipGrew = skippedIds.size > skipBefore;
+    if (grew || skipGrew || got > before) idle = 0;
     else idle += 1;
     const needMore = readingFolderTotal && got < readingFolderTotal;
-    if (!needMore && !readingHasMore && idle >= 6) break;
-    if (idle >= (needMore ? 40 : 20)) break;
+    const stillSkipping = knownSkip.size > 0 && skippedIds.size < knownSkip.size && got < max;
+    if (!stillSkipping && !needMore && !readingHasMore && idle >= 6) break;
+    if (idle >= (needMore || stillSkipping ? 40 : 20)) break;
   }
   return countProgress();
 }
