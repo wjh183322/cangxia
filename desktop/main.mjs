@@ -1497,36 +1497,29 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
       continue;
     }
     failStreak = 0;
+    const before = countProgress();
     const batch = collectAwemes(res.json);
     ingestPayload(url, res.json);
-    if (!batch.length) {
+    const grew = countProgress() > before;
+    if (!batch.length || !grew) {
       emptyStreak += 1;
-      const alt = await doRequest(win, {
-        method: "GET",
-        path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
-        query: { collects_id: id, cursor: String(cursor), max_cursor: String(cursor), count: "20" },
-      });
-      if (jsonOk(alt.json) && collectAwemes(alt.json).length) {
-        ingestPayload(url, alt.json);
-        emptyStreak = 0;
-        const nxt = nextCursor(alt.json, cursor);
-        cursor = nxt.cursor != null && String(nxt.cursor) !== String(cursor) ? nxt.cursor : Number(cursor) + 20;
-        await sleep(700);
-        continue;
-      }
-      if (folderTotal && countProgress() < folderTotal && emptyStreak < 2) {
-        cursor = Number(cursor) + pageSize;
-        await sleep(400);
-        continue;
-      }
-      break;
+      sendReadProgress(folderName, grew ? "" : "，接口没有新作品");
+      if (emptyStreak >= 2) break;
+      const nextTry = nextCursor(res.json, cursor);
+      cursor =
+        nextTry.cursor != null && String(nextTry.cursor) !== String(cursor)
+          ? nextTry.cursor
+          : Number(cursor) + pageSize;
+      readingCursor = cursor;
+      await sleep(400);
+      continue;
     }
     emptyStreak = 0;
     const next = nextCursor(res.json, cursor);
     if (next.cursor != null && String(next.cursor) !== String(cursor)) cursor = next.cursor;
     else cursor = Number(cursor) + Math.max(batch.length, pageSize);
     readingCursor = cursor;
-    await sleep(700);
+    await sleep(400);
   }
   rankCapturedByCollectTime(folderId);
   return countProgress();
