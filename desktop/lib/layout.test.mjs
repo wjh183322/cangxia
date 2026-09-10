@@ -153,7 +153,8 @@ test("mapAweme video keeps still and highest bit_rate", () => {
   assert.equal(work.images.length, 1);
   assert.equal(work.images[0].url, "https://x/still.jpg");
   assert.equal(work.videos.length, 1);
-  assert.equal(work.videoUrl, "https://x/play-hi.mp4");
+  assert.equal(work.videoUrl, "https://x/play.mp4");
+  assert.ok(work.videos[0].urls.includes("https://x/play-hi.mp4"));
 });
 
 test("mapAweme video skips h265 for a playable mp4", () => {
@@ -226,6 +227,30 @@ test("mapAweme builds iesdouyin play url from video uri", () => {
   );
   assert.match(work.videoUrl, /iesdouyin\.com\/aweme\/v1\/play\/\?video_id=v0200abc/);
   assert.ok(work.videos[0].urls.some((u) => u.includes("snssdk.com")));
+});
+
+test("mapAweme keeps larger duplicate gear_name and skips m4s", () => {
+  const work = mapAweme(
+    {
+      aweme_id: "silent",
+      desc: "舞",
+      video: {
+        origin_cover: { url_list: ["https://x/still.jpg"] },
+        play_addr: { url_list: ["https://x/muxed.mp4"] },
+        bit_rate: [
+          { gear_name: "adapt_low_540_0", play_addr: { url_list: ["https://x/silent.mp4"], data_size: 3_000_000 } },
+          { gear_name: "adapt_low_540_0", play_addr: { url_list: ["https://x/with-audio.mp4"], data_size: 10_000_000 } },
+          { gear_name: "dash", format: "dash", play_addr: { url_list: ["https://x/clip.m4s"] } },
+        ],
+      },
+      author: { nickname: "山", unique_id: "shan" },
+    },
+    { id: "default", name: "收藏" },
+  );
+  assert.equal(work.videoUrl, "https://x/muxed.mp4");
+  assert.ok(work.videos[0].urls.includes("https://x/with-audio.mp4"));
+  assert.equal(work.videos[0].urls.includes("https://x/silent.mp4"), false);
+  assert.equal(work.videos[0].urls.some((u) => u.endsWith(".m4s")), false);
 });
 
 test("writes numbered videos beside stills", async () => {

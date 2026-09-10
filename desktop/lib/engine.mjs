@@ -2,7 +2,7 @@ import { mkdir, copyFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { net } from "electron";
 import { exists, readIndex, writeIndex, writeWorkMeta, workDir } from "./layout.mjs";
-import { removePartial, sniffFile, transferToFile } from "./transfer.mjs";
+import { mp4HasAudio, removePartial, sniffFile, transferToFile } from "./transfer.mjs";
 import { albumUrlsFromShareHtml } from "./share-origin.mjs";
 
 const MOBILE_UA =
@@ -95,7 +95,8 @@ export async function runWork({ work, folderName, files, rootPath, session, send
           const kind = await sniffFile(dest);
           const videoOk = file.type !== "video" || kind === "mp4" || kind === "webm";
           const imageOk = file.type !== "image" || (kind !== "empty" && kind !== "html");
-          if (st.size > 32 && videoOk && imageOk) {
+          const audioOk = file.type !== "video" || (await mp4HasAudio(dest));
+          if (st.size > 32 && videoOk && imageOk && audioOk) {
             results.set(file.key, "done");
             send("cangxia:dl", { type: "file-done", workId: work.id, fileKey: file.key, received: st.size, total: st.size });
             continue;
@@ -144,6 +145,9 @@ export async function runWork({ work, folderName, files, rootPath, session, send
         const kind = await sniffFile(dest);
         if (file.type === "video" && kind !== "mp4" && kind !== "webm") {
           throw new Error(`not-video:${kind}`);
+        }
+        if (file.type === "video" && !(await mp4HasAudio(dest))) {
+          throw new Error("no-audio");
         }
         if (file.type === "image" && (kind === "empty" || kind === "html")) {
           throw new Error(`not-image:${kind}`);

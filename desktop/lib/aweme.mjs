@@ -9,6 +9,8 @@ function isVideoUrl(url) {
   if (!/^https?:\/\//.test(u)) return false;
   if (/\.(jpg|jpeg|png|webp|gif|heic|bmp)(\?|$)/i.test(u)) return false;
   if (/\.m3u8(\?|$)/i.test(u)) return false;
+  if (/\.m4s(\?|$)/i.test(u)) return false;
+  if (/\/dash\/|mediatype=dash|mime_type=video_dash/i.test(u)) return false;
   return true;
 }
 
@@ -24,8 +26,34 @@ function isPlayableRate(rate) {
   if (!rate || typeof rate !== "object") return false;
   if (rate.is_h265 === 1 || rate.is_h265 === true || rate.is_bytevc1 === 1 || rate.is_bytevc1 === true) return false;
   const tag = `${rate.gear_name || ""} ${rate.codec_type || ""} ${rate.format || ""}`;
-  if (/h265|hevc|bytevc1/i.test(tag)) return false;
+  if (/h265|hevc|bytevc1|dash/i.test(tag)) return false;
   return true;
+}
+
+function rateSize(rate) {
+  return (
+    Number(rate?.play_addr?.data_size) ||
+    Number(rate?.download_addr?.data_size) ||
+    Number(rate?.data_size) ||
+    Number(rate?.bit_rate) ||
+    0
+  );
+}
+
+function uniqueRates(rates) {
+  const kept = [];
+  const best = new Map();
+  for (const rate of rates) {
+    const gear = String(rate.gear_name || "").trim();
+    if (!gear) {
+      kept.push(rate);
+      continue;
+    }
+    const prev = best.get(gear);
+    if (!prev || rateSize(rate) > rateSize(prev)) best.set(gear, rate);
+  }
+  kept.push(...best.values());
+  return kept.sort((a, b) => rateSize(b) - rateSize(a));
 }
 
 function playUri(video) {
@@ -51,22 +79,19 @@ function videoCandidates(video) {
   };
   const rates = Array.isArray(video.bit_rate) ? [...video.bit_rate] : [];
   const playable = rates.filter(isPlayableRate);
-  const pool = (playable.length ? playable : rates).sort(
-    (a, b) =>
-      (Number(b.bit_rate) || Number(b.data_size) || 0) - (Number(a.bit_rate) || Number(a.data_size) || 0),
-  );
-  // 播放流无水印：先 bit_rate / play_addr，保存流 download_addr 常带「抖音号」水印，放到最后
-  for (const rate of pool) {
-    for (const u of rate?.play_addr?.url_list || rate?.play_addr_h264?.url_list || []) push(u);
-  }
+  const pool = uniqueRates(playable.length ? playable : rates);
+  // 整段播放地址带音轨；bit_rate 最高档经常是去音轨的纯画面
   for (const key of PLAY_ADDR_KEYS) {
     for (const u of video[key]?.url_list || []) push(u);
   }
   const uri = playUri(video);
   if (uri && !/^https?:/i.test(uri)) {
     const q = encodeURIComponent(uri);
-    push(`https://www.iesdouyin.com/aweme/v1/play/?video_id=${q}&ratio=1080p&line=0&watermark=0`);
-    push(`https://aweme.snssdk.com/aweme/v1/play/?video_id=${q}&ratio=1080p&line=0`);
+    push(`https://www.iesdouyin.com/aweme/v1/play/?video_id=${q}&ratio=1080p&line=0&watermark=0&media_type=4&is_play_url=1&is_support_h265=0`);
+    push(`https://aweme.snssdk.com/aweme/v1/play/?video_id=${q}&ratio=1080p&line=0&media_type=4`);
+  }
+  for (const rate of pool) {
+    for (const u of rate?.play_addr?.url_list || rate?.play_addr_h264?.url_list || []) push(u);
   }
   for (const rate of pool) {
     for (const u of rate?.download_addr?.url_list || []) push(u);
