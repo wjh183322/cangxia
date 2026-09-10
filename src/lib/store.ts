@@ -913,7 +913,7 @@ async function runRefresh(opts: { fullFolder: boolean; max: number }) {
     const knownIds = opts.fullFolder
       ? []
       : folderName === "收藏"
-        ? visible.filter((w) => w.allIndex != null).map((w) => w.id)
+        ? visible.filter((w) => inFolder(w, "default")).map((w) => w.id)
         : visible.filter((w) => inFolder(w, folderId)).map((w) => w.id);
     const startAllIndex = visible.reduce((m, w) => Math.max(m, w.allIndex ?? -1), -1) + 1;
     useApp.setState({

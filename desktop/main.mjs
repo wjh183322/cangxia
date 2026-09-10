@@ -1740,8 +1740,8 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     return;
   }
   const steps = [
-    ["拦页面", () => harvestMcp(win, ctx)],
     ["页面fetch", () => harvestVia(win, ctx, signedRequest)],
+    ["拦页面", () => harvestMcp(win, ctx)],
   ];
   const tried = [];
   const addedSince = (before) => {
