@@ -1100,22 +1100,51 @@ async function currentHref(win) {
   }
 }
 
+async function loadAndWait(win, url) {
+  if (!win || win.isDestroyed()) return;
+  await new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        win.webContents.removeListener("did-finish-load", onOk);
+        win.webContents.removeListener("did-fail-load", onFail);
+      } catch {
+        /* ignore */
+      }
+      resolve();
+    };
+    const onOk = () => done();
+    const onFail = () => done();
+    const timer = setTimeout(done, 18000);
+    win.webContents.once("did-finish-load", onOk);
+    win.webContents.once("did-fail-load", onFail);
+    win.loadURL(url, { userAgent: CHROME_UA }).catch(() => done());
+  });
+  await sleep(600);
+}
+
+function pageIsTarget(href, folderName) {
+  if (!/\/user\/self/i.test(href || "")) return false;
+  if (folderName === "收藏") {
+    return /showTab=favorite(?!_collection)/i.test(href) || /showTab=favorite(&|$)/i.test(href);
+  }
+  return /showSubTab=favorite_folder/i.test(href);
+}
+
 async function waitPageReady(win, folderName = "收藏") {
   const target = folderName === "收藏" ? FAVORITE_ALL_URL : FAVORITE_FOLDER_LIST_URL;
-  send("cangxia:progress", {
-    active: true,
-    current: 0,
-    total: 1,
-    message: folderName === "收藏" ? "打开总收藏页" : "打开收藏夹列表页（不点首页收藏）",
-  });
+  sendReadProgress(folderName === "收藏" ? "收藏" : folderName, "，打开页面");
   let href = await currentHref(win);
-  const need =
-    folderName === "收藏"
-      ? !/showTab=favorite(?!_collection)/i.test(href) && !/showTab=favorite(&|$)/i.test(href)
-      : !/showSubTab=favorite_folder/i.test(href);
-  if (!/\/user\/self/i.test(href) || need) {
-    await win.loadURL(target, { userAgent: CHROME_UA });
-    await sleep(2800);
+  for (let i = 0; i < 16 && !pageIsTarget(href, folderName); i += 1) {
+    await sleep(400);
+    if (!win || win.isDestroyed()) return;
+    href = await currentHref(win);
+  }
+  if (!pageIsTarget(href, folderName)) {
+    await loadAndWait(win, target);
   }
   try {
     await win.webContents.executeJavaScript(HOOK_PAGE_FEEDS_SCRIPT);
@@ -1132,13 +1161,6 @@ async function waitPageReady(win, folderName = "收藏") {
   } catch {
     /* continue */
   }
-  href = await currentHref(win);
-  send("cangxia:progress", {
-    active: true,
-    current: 0,
-    total: 1,
-    message: `页面 ${href.replace("https://www.douyin.com", "").slice(0, 48) || "未知"}`,
-  });
 }
 
 async function harvestFolderNames(win) {
@@ -1517,11 +1539,10 @@ async function continueFolderInPage(win, { folderId, folderName, max, started })
     sendReadProgress(folderName, "，打开夹");
     const url = `${FAVORITE_FOLDER_LIST_URL}&collects_id=${id}`;
     try {
-      await win.loadURL(url, { userAgent: CHROME_UA });
+      await loadAndWait(win, url);
     } catch {
       /* keep current page */
     }
-    await sleep(2200);
   }
   await openNamedFolder(win, folderName, { skipNav: true });
   readingInside = true;
@@ -1948,6 +1969,9 @@ function openDouyinWindow(path = "https://www.douyin.com/", { assistQr = false, 
     }
   });
   if (!deferLoad) void douyinWindow.loadURL(path, { userAgent: CHROME_UA });
+  douyinWindow.webContents.on("render-process-gone", (_e, details) => {
+    noteHarvest(`页面崩溃 ${details?.reason || ""}`);
+  });
   douyinWindow.on("closed", () => {
     douyinWindow = null;
     if (loginWaiting) loginWaiting = false;
@@ -2156,14 +2180,15 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   send("cangxia:progress", {
     active: true,
     current: 0,
-    total: fullFolder ? 1 : max,
+    total: fullFolder ? 0 : max,
     message: fullFolder ? `全部读取「${folderName}」进清单` : `已开始监听「${folderName}」，本次新增 ${max} 条`,
   });
   void (async () => {
+    let failed = "";
     try {
       await Promise.race([attachNetwork(win), sleep(1500)]);
       if (win && !win.isDestroyed()) {
-        await win.loadURL(startUrl, { userAgent: CHROME_UA });
+        await loadAndWait(win, startUrl);
       }
       const folder = ensureFolder(folderName);
       readingFolderId = folder.id;
@@ -2184,9 +2209,20 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
         max,
         started: readingStarted,
       });
+    } catch (err) {
+      failed = String(err?.message || err);
+      noteHarvest(failed);
+      lastHarvestMethod = `页面出错：${failed}`.slice(0, 120);
+      send("cangxia:progress", {
+        active: true,
+        current: countProgress(),
+        total: progressTotal(),
+        message: lastHarvestMethod,
+      });
+      await sleep(5000);
     } finally {
       await completeRefresh();
-      if (win && !win.isDestroyed()) win.close();
+      if (!failed && win && !win.isDestroyed()) win.close();
     }
   })();
   return { ok: true, waiting: true };
