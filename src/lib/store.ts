@@ -959,24 +959,12 @@ async function runRefresh(opts: { fullFolder: boolean; max: number }) {
 function mergeIncoming(existing: Work[], incoming: Work[]) {
   const byId = new Map(existing.map((w) => [w.id, w]));
   let nextAll = Math.max(-1, ...existing.map((w) => w.allIndex ?? -1)) + 1;
-  const nextList = new Map<string, number>();
-  const takeList = (folderId: string) => {
-    if (!nextList.has(folderId)) {
-      nextList.set(
-        folderId,
-        Math.max(-1, ...existing.filter((w) => w.folderId === folderId).map((w) => w.listIndex ?? -1)) + 1,
-      );
-    }
-    const n = nextList.get(folderId) || 0;
-    nextList.set(folderId, n + 1);
-    return n;
-  };
   for (const w of incoming) {
     const prev = byId.get(w.id);
     if (!prev) {
       const next = { ...w };
       if (w.allIndex != null) next.allIndex = nextAll++;
-      if (w.listIndex != null && w.folderId && w.folderId !== "default") next.listIndex = takeList(w.folderId);
+      if (w.listIndex != null && w.folderId && w.folderId !== "default") next.listIndex = w.listIndex;
       byId.set(w.id, next);
       continue;
     }
@@ -990,7 +978,7 @@ function mergeIncoming(existing: Work[], incoming: Work[]) {
       alsoInFolderIds: [...new Set([...(prev.alsoInFolderIds || []), ...(w.alsoInFolderIds || []), prev.folderId, w.folderId].filter((id) => id && id !== folderId))],
       collectTimeKnown: Boolean(w.collectTimeKnown || prev.collectTimeKnown),
       collectedAt: w.collectTimeKnown ? w.collectedAt : prev.collectTimeKnown ? prev.collectedAt : w.collectedAt,
-      listIndex: prev.listIndex ?? (w.listIndex != null && folderId !== "default" ? takeList(folderId) : w.listIndex),
+      listIndex: w.listIndex != null && folderId !== "default" ? w.listIndex : prev.listIndex ?? w.listIndex,
       allIndex: prev.allIndex ?? (w.allIndex != null ? nextAll++ : w.allIndex),
     });
   }

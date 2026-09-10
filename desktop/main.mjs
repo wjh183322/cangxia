@@ -270,10 +270,9 @@ function rankCapturedByCollectTime(folderId) {
     (w) => w.folderId === folderId || (w.alsoInFolderIds || []).includes(folderId),
   );
   mine.sort((a, b) => {
-    const ak = a.collectTimeKnown ? 0 : 1;
-    const bk = b.collectTimeKnown ? 0 : 1;
-    if (ak !== bk) return ak - bk;
-    if (!ak) return (b.collectedAt || 0) - (a.collectedAt || 0);
+    if (a.collectTimeKnown && b.collectTimeKnown && a.collectedAt !== b.collectedAt) {
+      return (b.collectedAt || 0) - (a.collectedAt || 0);
+    }
     return (a.listIndex ?? 0) - (b.listIndex ?? 0);
   });
   mine.forEach((w, i) => {
