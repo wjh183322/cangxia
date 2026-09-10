@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ensureWorkFolder, readIndex, writeIndex, folderTitle, deleteWorkFolders, exists, relocateWorkFolder } from "./layout.mjs";
+import { ensureWorkFolder, readIndex, writeIndex, folderTitle, deleteWorkFolders, exists, relocateWorkFolder, scanLibrary } from "./layout.mjs";
 import { mapAweme, unwrapAweme, collectAwemes, mergeWorks, isCollectFeedUrl, isFolderListUrl } from "./aweme.mjs";
 
 test("folderTitle strips illegal chars and keeps id", () => {
@@ -349,6 +349,38 @@ test("relocateWorkFolder moves from 收藏 to custom folder", async () => {
     assert.equal(meta.folderName, "雷电将军");
     const index = await readIndex(root);
     assert.equal(index.records[0].dir, moved.dir);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("scanLibrary reads index meta and cover", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cangxia-"));
+  try {
+    const work = {
+      id: "91",
+      title: "茶席蒸汽",
+      authorName: "桌面博物",
+      douyinId: "tablemuse",
+      caption: "#茶",
+      hashtags: ["茶"],
+      userTags: [],
+      kind: "album",
+    };
+    const result = await ensureWorkFolder({
+      rootPath: root,
+      folderName: "玛丽罗斯",
+      work,
+      imageFiles: [{ name: "a.jpg", bytes: Buffer.from("fake-jpeg") }],
+    });
+    await writeIndex(root, [{ id: work.id, dir: result.dir, status: "downloaded" }]);
+    const lib = await scanLibrary(root);
+    assert.equal(lib.length, 1);
+    assert.equal(lib[0].id, "91");
+    assert.equal(lib[0].folderName, "玛丽罗斯");
+    assert.equal(lib[0].authorName, "桌面博物");
+    assert.ok(String(lib[0].coverUrl).startsWith("cangxia-media://"));
+    assert.ok(lib[0].images.length >= 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

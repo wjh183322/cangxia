@@ -49,7 +49,7 @@ export function LoginScreen() {
               ? "读取收藏夹需要先登录自己的抖音号。扫码后会继续读取名单。"
               : pendingRead
                 ? "读取收藏需要先登录自己的抖音号。扫码后会继续读取。"
-                : "扫码登录自己的抖音号后，才能读取收藏。图库和已同步的清单不登录也能看。"
+                : "扫码登录自己的抖音号后，才能读取收藏。本地和已同步的清单不登录也能看。"
             : "备份当前登录号的抖音收藏图集。文件只落本机。预览使用演示数据，不会连接你的真实账号。"}
         </p>
         <div className="mt-8 flex min-h-40 items-center justify-center rounded-lg bg-raised">
@@ -74,7 +74,7 @@ export function LoginScreen() {
           className="mt-3 w-full text-center text-xs text-muted hover:text-fg"
           onClick={() => skipLoginGate()}
         >
-          先不登录，返回图库
+          先不登录，返回本地
         </button>
         <p className="mt-4 text-xs leading-relaxed text-subtle">
           验证码出现时会暂停并通知你，需在本机窗口里完成滑块，不会自动过码。

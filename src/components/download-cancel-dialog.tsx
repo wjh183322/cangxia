@@ -39,7 +39,7 @@ export function DownloadCancelDialog() {
           </p>
         )}
         <p className="mt-3 text-sm leading-relaxed text-muted">
-          将删除这些作品的整个本机文件夹（图、视频和记录）。不能从回收站找回。抖音收藏不会动。图库里会消失，收藏清单变回「新」。
+          将删除这些作品的整个本机文件夹（图、视频和记录）。不能从回收站找回。抖音收藏不会动。本地里会消失，读取清单里同一条改回「新」。
         </p>
         <div className="mt-6 flex flex-col gap-2 sm:flex-row">
           <Button className="flex-1" variant="danger" onClick={() => void confirm()}>

@@ -11,13 +11,7 @@ export function FolderDeleteDialog() {
   const cancelDeleteFolder = useApp((s) => s.cancelDeleteFolder);
 
   const folder = folders.find((f) => f.id === id) || null;
-  const count = id
-    ? works.filter(
-        (w) =>
-          !hiddenCollectIds.includes(w.id) &&
-          (w.folderId === id || w.alsoInFolderIds.includes(id)),
-      ).length
-    : 0;
+  const count = id ? works.filter((w) => w.folderId === id).length : 0;
 
   useEffect(() => {
     if (!id) return;
@@ -36,7 +30,7 @@ export function FolderDeleteDialog() {
         <p className="text-xs font-medium text-danger">从清单删除收藏夹</p>
         <h2 className="mt-2 text-lg font-semibold">删除「{folder.name}」</h2>
         <p className="mt-3 text-sm leading-relaxed text-muted">
-          将从左侧去掉这个收藏夹，并移出其中 {count} 条作品清单。图库和硬盘文件不动。下次再读取这个夹，清单会回来。
+          将从左侧去掉这个收藏夹，并移出其中 {count} 条。总收藏清单里同一条也会去掉。本地和硬盘文件不动。
         </p>
         <div className="mt-6 flex flex-col gap-2 sm:flex-row">
           <Button className="flex-1" variant="danger" onClick={() => confirmDeleteFolder()}>

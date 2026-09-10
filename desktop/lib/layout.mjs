@@ -1,4 +1,4 @@
-import { mkdir, writeFile, copyFile, access, readFile, rm, rename } from "node:fs/promises";
+import { mkdir, writeFile, copyFile, access, readFile, rm, rename, readdir } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFile } from "node:child_process";
@@ -195,4 +195,58 @@ export async function writeWorkMeta(dir, work, folderName, videoStatus) {
     "utf8",
   );
   await writeDesktopIni(dir);
+}
+
+export function mediaUrl(absPath) {
+  return `cangxia-media://local/?p=${encodeURIComponent(String(absPath || ""))}`;
+}
+
+export async function scanLibrary(rootPath) {
+  const index = await readIndex(rootPath);
+  const works = [];
+  for (const rec of index.records || []) {
+    const dir = rec.dir;
+    if (!dir || !(await exists(dir))) continue;
+    let meta = {};
+    try {
+      meta = JSON.parse(await readFile(join(dir, "meta.json"), "utf8"));
+    } catch {
+      meta = {};
+    }
+    let names = [];
+    try {
+      names = await readdir(dir);
+    } catch {
+      names = [];
+    }
+    const pics = names.filter((n) => /^图\d+\.(jpe?g|png|webp|gif|bmp)$/i.test(n)).sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+    const clips = names.filter((n) => /^视频\d+\.mp4$/i.test(n)).sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+    const images = pics.map((n, i) => ({ id: `${rec.id}_img_${i}`, url: mediaUrl(join(dir, n)) }));
+    const videos = clips.map((n, i) => ({ id: `${rec.id}_v_${i}`, url: mediaUrl(join(dir, n)) }));
+    const coverFile = names.includes("cover.jpg") ? join(dir, "cover.jpg") : pics[0] ? join(dir, pics[0]) : "";
+    const folderName = String(meta.folderName || rec.folderName || "收藏").trim() || "收藏";
+    const kind = meta.kind || (videos.length && images.length ? "mixed" : videos.length ? "video" : "album");
+    works.push({
+      id: String(meta.id || rec.id),
+      title: meta.title || "未命名",
+      authorName: meta.authorName || "",
+      douyinId: meta.douyinId || "",
+      caption: meta.caption || "",
+      hashtags: Array.isArray(meta.hashtags) ? meta.hashtags : [],
+      userTags: Array.isArray(meta.userTags) ? meta.userTags : [],
+      folderId: folderName === "收藏" ? "default" : `disk_${folderName}`,
+      folderName,
+      alsoInFolderIds: [],
+      kind,
+      status: "downloaded",
+      videoStatus: videos.length ? "saved" : meta.videoStatus || "none",
+      videos,
+      collectedAt: Date.parse(meta.downloadedAt || rec.at || "") || 0,
+      collectTimeKnown: false,
+      images,
+      coverUrl: coverFile ? mediaUrl(coverFile) : "",
+      localDir: dir,
+    });
+  }
+  return works;
 }

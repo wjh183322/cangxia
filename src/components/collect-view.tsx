@@ -33,9 +33,7 @@ export function CollectView() {
 
   const list = listWorks(works, folderId, kind, hiddenCollectIds);
   const folderName = folders.find((f) => f.id === folderId)?.name || "收藏";
-  const folderCount = works.filter(
-    (w) => !hiddenCollectIds.includes(w.id) && (w.folderId === folderId || w.alsoInFolderIds.includes(folderId)),
-  ).length;
+  const folderCount = works.filter((w) => w.folderId === folderId).length;
 
   function downloadRange() {
     const from = Math.max(1, Number(rangeFrom) || 1);
@@ -95,7 +93,7 @@ export function CollectView() {
             <p className="text-xs font-medium text-muted">移出清单</p>
             <h2 className="mt-2 text-lg font-semibold">全部移出「{folderName}」</h2>
             <p className="mt-3 text-sm leading-relaxed text-muted">
-              从清单移出全部 {folderCount} 条。图库和硬盘文件不动，只是收藏页不再显示。
+              从读取清单移出全部 {folderCount} 条。本地和硬盘文件不动。若其它夹也有同一条，也会从那些清单去掉。
             </p>
             <div className="mt-6 flex flex-col gap-2 sm:flex-row">
               <Button
@@ -117,7 +115,7 @@ export function CollectView() {
 
       <div className="min-h-0 flex-1 overflow-auto p-4">
         {list.length === 0 ? (
-          <p className="py-16 text-center text-sm text-muted">这个列表是空的。先点「读取收藏夹」勾选要显示的夹，再点左侧夹，点「读取收藏」读作品。</p>
+          <p className="py-16 text-center text-sm text-muted">这个列表是空的。先点「读取收藏夹」勾选要显示的夹，再点左侧夹，点「读取收藏」读作品。总收藏只显示自己读到的，不会带出自建夹。</p>
         ) : (
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {list.map((work, index) => {

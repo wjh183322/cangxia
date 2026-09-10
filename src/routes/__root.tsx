@@ -12,7 +12,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: APP_NAME },
       { name: "theme-color", content: "#0c0c0d" },
-      { name: "description", content: "备份自己的抖音收藏图集。清单勾选下载，内置图库浏览。" },
+      { name: "description", content: "备份自己的抖音收藏图集。读取清单勾选下载，本地点开浏览。" },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },

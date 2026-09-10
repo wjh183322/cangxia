@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("cangxia", {
   saveList: (payload) => ipcRenderer.invoke("cangxia:save-list", payload || {}),
   openListFile: () => ipcRenderer.invoke("cangxia:open-list-file"),
   fileStatus: (ids) => ipcRenderer.invoke("cangxia:file-status", ids || []),
+  scanLibrary: () => ipcRenderer.invoke("cangxia:scan-library"),
   refresh: (opts) => ipcRenderer.invoke("cangxia:refresh", opts || {}),
   listFolders: () => ipcRenderer.invoke("cangxia:list-folders"),
   moveWorks: (payload) => ipcRenderer.invoke("cangxia:move-works", payload || {}),

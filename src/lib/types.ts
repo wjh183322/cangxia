@@ -35,6 +35,7 @@ export interface Work {
   hashtags: string[];
   userTags: string[];
   folderId: string;
+  folderName?: string;
   alsoInFolderIds: string[];
   kind: MediaKind;
   status: WorkStatus;

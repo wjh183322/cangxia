@@ -21,6 +21,7 @@ interface AppState {
   loggedIn: boolean;
   folders: Folder[];
   works: Work[];
+  libraryWorks: Work[];
   tab: AppTab;
   folderId: string;
   libraryFolderId: string;
@@ -167,10 +168,62 @@ function stripDemoState<T extends { works?: Work[]; folders?: Folder[]; folderId
 }
 
 function inFolder(work: Work, folderId: string) {
-  return work.folderId === folderId || work.alsoInFolderIds.includes(folderId);
+  return work.folderId === folderId;
+}
+
+function overlayDiskStatus(works: Work[], present: Set<string>): Work[] {
+  return works.map((w) => {
+    if (present.has(w.id)) {
+      return {
+        ...w,
+        status: w.status === "stale" ? "stale" : "downloaded",
+        videoStatus: w.videoStatus === "saved" ? "saved" : w.videoStatus,
+      };
+    }
+    if (w.status === "downloaded") {
+      return { ...w, status: "new" as const, videoStatus: w.videos?.length ? "pending" : "none" };
+    }
+    return w;
+  });
+}
+
+function syncStatusCopies(works: Work[]): Work[] {
+  const best = new Map<string, { status: Work["status"]; videoStatus: Work["videoStatus"] }>();
+  const rank = (s: Work["status"]) => (s === "downloaded" || s === "stale" ? 2 : s === "no-origin" ? 1 : 0);
+  for (const w of works) {
+    const prev = best.get(w.id);
+    if (!prev || rank(w.status) > rank(prev.status) || (videoStatusOf(w) === "saved" && prev.videoStatus !== "saved")) {
+      best.set(w.id, {
+        status: rank(w.status) >= rank(prev?.status || "new") ? w.status : prev?.status || w.status,
+        videoStatus: videoStatusOf(w) === "saved" || prev?.videoStatus === "saved" ? "saved" : videoStatusOf(w),
+      });
+    }
+  }
+  return works.map((w) => {
+    const b = best.get(w.id);
+    return b ? { ...w, status: b.status, videoStatus: b.videoStatus } : w;
+  });
 }
 
 export { inFolder };
+
+export function libraryFoldersOf(libraryWorks: Work[]): Folder[] {
+  const out: Folder[] = [{ id: "default", name: "收藏", isDefault: true }];
+  const seen = new Set(["收藏"]);
+  for (const w of libraryWorks) {
+    const name = (w.folderName || "").trim() || (w.folderId === "default" ? "收藏" : "");
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push({ id: `disk_${name}`, name, isDefault: false });
+  }
+  return out;
+}
+
+export function libraryInFolder(work: Work, folderId: string) {
+  if (!folderId || folderId === "default" || folderId === "all") return true;
+  const want = folderId.startsWith("disk_") ? folderId.slice(5) : folderId;
+  return work.folderName === want || work.folderId === folderId;
+}
 
 export function listWorks(works: Work[], folderId: string, kind: KindFilter, hiddenIds: string[] = []) {
   const hidden = new Set(hiddenIds);
@@ -189,6 +242,7 @@ export const useApp = create<AppState>()(
       loggedIn: false,
       folders: liveDesktop() ? emptyFolders() : FOLDERS,
       works: liveDesktop() ? [] : WORKS,
+      libraryWorks: liveDesktop() ? [] : WORKS.filter((w) => w.status === "downloaded" || w.status === "stale"),
       tab: "collect",
       folderId: "default",
       libraryFolderId: "default",
@@ -337,6 +391,9 @@ export const useApp = create<AppState>()(
           works: s.works.map((w) =>
             w.id === workId && !w.userTags.includes(t) ? { ...w, userTags: [...w.userTags, t] } : w,
           ),
+          libraryWorks: s.libraryWorks.map((w) =>
+            w.id === workId && !w.userTags.includes(t) ? { ...w, userTags: [...w.userTags, t] } : w,
+          ),
         }));
       },
       applyTagFilter: (kind, tag, fromWorkId) =>
@@ -412,12 +469,12 @@ export const useApp = create<AppState>()(
         if (api) {
           const folderNames = Object.fromEntries(state.folders.map((f) => [f.id, f.name]));
           const items = ids
-            .map((id) => state.works.find((w) => w.id === id))
+            .map((id) => state.libraryWorks.find((w) => w.id === id) || state.works.find((w) => w.id === id))
             .filter((w): w is Work => Boolean(w))
             .map((w) => ({
               id: w.id,
               title: w.title,
-              folderName: folderNames[w.folderId] || "收藏",
+              folderName: w.folderName || folderNames[w.folderId] || "收藏",
             }));
           const res = await api.deleteWorks({ works: items });
           if (!res.ok) {
@@ -519,9 +576,9 @@ export const useApp = create<AppState>()(
       clearDlDone: () => set((s) => ({ dlTasks: s.dlTasks.filter((t) => t.status !== "done") })),
       openWorkFolder: (workId) => {
         const state = get();
-        const work = state.works.find((w) => w.id === workId);
+        const work = state.libraryWorks.find((w) => w.id === workId) || state.works.find((w) => w.id === workId);
         const task = state.dlTasks.find((t) => t.workId === workId);
-        const folderName = state.folders.find((f) => f.id === (work?.folderId || task?.folderId))?.name || "收藏";
+        const folderName = work?.folderName || state.folders.find((f) => f.id === (work?.folderId || task?.folderId))?.name || "收藏";
         const title = work?.title || task?.title || "";
         const api = desktop();
         if (api) {
@@ -590,12 +647,11 @@ export const useApp = create<AppState>()(
         if (!api) return;
         await api.stopRefresh();
       },
-      applyRefreshResult: (folders, works, extra) => {
+      applyRefreshResult: (folders, incoming, extra) => {
         const existing = liveDesktop() ? get().works.filter((w) => !isDemoWork(w)) : get().works;
-        const seen = new Set(works.map((w) => w.id));
-        const incomingIds = new Set((folders || []).map((f) => f.id));
-        const seenFolders = new Set(works.flatMap((w) => [w.folderId, ...(w.alsoInFolderIds || [])]));
-        const deletedFolderIds = get().deletedFolderIds.filter((id) => !incomingIds.has(id) && !seenFolders.has(id));
+        const incomingIds = new Set((incoming || []).map((w) => w.id));
+        const incomingFolderIds = new Set((folders || []).map((f) => f.id));
+        const deletedFolderIds = get().deletedFolderIds.filter((id) => !incomingFolderIds.has(id));
         const prev = get().folders;
         const byId = new Map(prev.map((f) => [f.id, f]));
         for (const f of folders || []) {
@@ -614,28 +670,36 @@ export const useApp = create<AppState>()(
         for (const f of folders || []) {
           if (!f.isDefault) chosen = [...new Set([...chosen, f.id, f.name])];
         }
-        const folderId = nextFolders.some((f) => f.id === get().folderId) ? get().folderId : nextFolders[0].id;
-        const merged = rankFolderIfNeeded(mergeIncoming(existing, works), extra?.folder, nextFolders);
-        const toMove = merged.flatMap((w) => {
-          const last = existing.find((p) => p.id === w.id);
-          if (!last) return [];
-          const wasDefault = !last.folderId || last.folderId === "default";
-          if (!wasDefault || !w.folderId || w.folderId === "default") return [];
-          if (w.status !== "downloaded" && w.status !== "stale") return [];
-          const toName = nextFolders.find((f) => f.id === w.folderId)?.name;
-          if (!toName || toName === "收藏") return [];
-          return [{ id: w.id, title: w.title, fromName: "收藏", toName }];
-        });
+        const folderName = extra?.folder || "收藏";
+        const target =
+          nextFolders.find((f) => f.name === folderName || (folderName === "收藏" && f.isDefault)) || nextFolders[0];
+        const fid = target.id;
+        const tagged = (incoming || []).map((w) => ({ ...w, folderId: fid, alsoInFolderIds: [] as string[] }));
+        const mine = existing.filter((w) => w.folderId === fid);
+        const rest = existing.filter((w) => w.folderId !== fid);
+        const mergedMine = rankFolderIfNeeded(mergeIncoming(mine, tagged), folderName, nextFolders).map((w) => ({
+          ...w,
+          folderId: fid,
+          alsoInFolderIds: [],
+        }));
+        let merged = syncStatusCopies([...rest, ...mergedMine]);
+        const toMove =
+          folderName !== "收藏"
+            ? mergedMine
+                .filter((w) => w.status === "downloaded" || w.status === "stale")
+                .map((w) => ({ id: w.id, title: w.title, fromName: "收藏", toName: folderName }))
+            : [];
         if (toMove.length) {
           const api = desktop();
           if (api?.moveWorks) void api.moveWorks({ works: toMove });
         }
+        const folderId = nextFolders.some((f) => f.id === get().folderId) ? get().folderId : nextFolders[0].id;
         set({
           folders: nextFolders,
           folderId,
           chosenFolderIds: chosen,
           works: merged,
-          hiddenCollectIds: get().hiddenCollectIds.filter((id) => !seen.has(id)),
+          hiddenCollectIds: get().hiddenCollectIds.filter((id) => !incomingIds.has(id)),
           deletedFolderIds,
           syncingBrowser: false,
           job: { active: false, current: 0, total: 0, message: "" },
@@ -644,20 +708,18 @@ export const useApp = create<AppState>()(
       },
       syncDownloadedFromDisk: async () => {
         const api = desktop();
-        if (!api?.fileStatus) return;
-        const ids = get()
-          .works.filter((w) => w.status === "downloaded" || w.status === "stale")
-          .map((w) => w.id);
-        if (!ids.length) return;
-        const res = await api.fileStatus(ids);
-        const have = new Set(res.present || []);
+        if (api?.scanLibrary) {
+          const res = await api.scanLibrary();
+          const lib = res.works || [];
+          const present = new Set(lib.map((w) => w.id));
+          set((s) => ({
+            libraryWorks: lib,
+            works: syncStatusCopies(overlayDiskStatus(s.works, present)),
+          }));
+          return;
+        }
         set((s) => ({
-          works: s.works.map((w) => {
-            if ((w.status === "downloaded" || w.status === "stale") && !have.has(w.id)) {
-              return { ...w, status: "new" as const, videoStatus: w.videos?.length ? "pending" : "none" };
-            }
-            return w;
-          }),
+          libraryWorks: s.works.filter((w) => w.status === "downloaded" || w.status === "stale"),
         }));
       },
       openFolderPick: (list) => {
@@ -722,14 +784,16 @@ export const useApp = create<AppState>()(
       hideFromCollect: (ids) => {
         const unique = [...new Set(ids.filter(Boolean))];
         if (!unique.length) return;
+        const drop = new Set(unique);
         set((s) => ({
-          hiddenCollectIds: [...new Set([...s.hiddenCollectIds, ...unique])],
-          selectedIds: s.selectedIds.filter((id) => !unique.includes(id)),
+          works: s.works.filter((w) => !drop.has(w.id)),
+          hiddenCollectIds: s.hiddenCollectIds.filter((id) => !drop.has(id)),
+          selectedIds: s.selectedIds.filter((id) => !drop.has(id)),
         }));
       },
       hideFolderFromCollect: (folderId) => {
         const ids = get()
-          .works.filter((w) => inFolder(w, folderId))
+          .works.filter((w) => w.folderId === folderId)
           .map((w) => w.id);
         get().hideFromCollect(ids);
       },
@@ -738,29 +802,22 @@ export const useApp = create<AppState>()(
       confirmDeleteFolder: () => {
         const id = get().pendingFolderDeleteId;
         if (!id) return;
-        const hideIds: string[] = [];
-        const works = get().works.map((w) => {
-          if (!inFolder(w, id)) return w;
-          const others = [w.folderId, ...(w.alsoInFolderIds || [])].filter((x) => x !== id);
-          if (!others.length) {
-            hideIds.push(w.id);
-            return w;
-          }
-          return { ...w, folderId: others[0], alsoInFolderIds: others.slice(1) };
-        });
+        const ids = get()
+          .works.filter((w) => w.folderId === id)
+          .map((w) => w.id);
+        const drop = new Set(ids);
         let folders = get().folders.filter((f) => f.id !== id);
         if (!folders.length) folders = emptyFolders();
         const folderId = get().folderId === id ? folders[0].id : get().folderId;
         set({
-          works,
+          works: get().works.filter((w) => w.folderId !== id && !drop.has(w.id)),
           folders,
           folderId,
           libraryFolderId: get().libraryFolderId === id ? "default" : get().libraryFolderId,
-          hiddenCollectIds: [...new Set([...get().hiddenCollectIds, ...hideIds])],
           deletedFolderIds: [...new Set([...get().deletedFolderIds, id])],
-          chosenFolderIds: get().chosenFolderIds.filter((x) => x !== id),
+          chosenFolderIds: get().chosenFolderIds.filter((x) => x !== id && x !== get().folders.find((f) => f.id === id)?.name),
           pendingFolderDeleteId: null,
-          selectedIds: get().selectedIds.filter((x) => !hideIds.includes(x)),
+          selectedIds: get().selectedIds.filter((x) => !drop.has(x)),
         });
       },
 
@@ -769,7 +826,7 @@ export const useApp = create<AppState>()(
         if (unique.length === 0) return;
         const state = get();
         const incoming = unique
-          .map((id) => state.works.find((w) => w.id === id))
+          .map((id) => state.works.find((w) => w.id === id && w.folderId === state.folderId) || state.works.find((w) => w.id === id))
           .filter((w): w is Work => Boolean(w))
           .filter((w) => workNeedsDownload(w))
           .map(taskFromWork);
@@ -833,7 +890,7 @@ export const useApp = create<AppState>()(
       },
     }),
     {
-      name: "cangxia-v6",
+      name: "cangxia-v7",
       partialize: (s) => ({
         loggedIn: s.loggedIn,
         folders: s.folders,
@@ -876,6 +933,7 @@ export const useApp = create<AppState>()(
         state.pendingFolderPick = null;
         state.folderPickChecked = [];
         state.pendingFolderDeleteId = null;
+        if (!state.libraryWorks) state.libraryWorks = [];
         if (!state.libraryFolderId || state.libraryFolderId === "all") state.libraryFolderId = "default";
         state.loginGate = false;
         state.pendingReadAfterLogin = false;
@@ -912,9 +970,7 @@ async function runRefresh(opts: { fullFolder: boolean; max: number }) {
     const visible = works.filter((w) => !hidden.has(w.id));
     const knownIds = opts.fullFolder
       ? []
-      : folderName === "收藏"
-        ? visible.filter((w) => w.allIndex != null).map((w) => w.id)
-        : visible.filter((w) => inFolder(w, folderId)).map((w) => w.id);
+      : visible.filter((w) => w.folderId === folderId).map((w) => w.id);
     const startAllIndex = visible.reduce((m, w) => Math.max(m, w.allIndex ?? -1), -1) + 1;
     useApp.setState({
       job: {

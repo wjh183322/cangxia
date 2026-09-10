@@ -49,8 +49,8 @@ export function SettingsDialog() {
           </label>
           {isDesktop() && (
             <div className="rounded-md border border-line bg-raised px-3 py-2 text-xs text-muted">
-              <p>清单文件（可打开的 JSON）</p>
-              <p className="mt-1 break-all text-fg">{paths.listFile || `${settings.rootPath || "（先选下载根目录）"}\\.cangxia\\works.json`}</p>
+              <p>读取清单目录（一夹一份 JSON）</p>
+              <p className="mt-1 break-all text-fg">{paths.listFile || `${settings.rootPath || "（先选下载根目录）"}\\.cangxia\\lists`}</p>
               <p className="mt-2">程序缓存目录（名字不一定叫藏匣）</p>
               <p className="mt-1 break-all text-fg">{paths.userData || "打开设置后显示"}{paths.appName ? `（${paths.appName}）` : ""}</p>
               {paths.listFile ? (

@@ -6,7 +6,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { TagPickerDialog } from "@/components/tag-picker-dialog";
 import { Button } from "@/components/ui/button";
 import { isDesktop } from "@/lib/desktop";
-import { inFolder, useApp } from "@/lib/store";
+import { libraryInFolder, useApp } from "@/lib/store";
 import type { Work } from "@/lib/types";
 import { folderTitle, kindChip, matchesKind, compareCollectTime, videoStatusOf, workSlides, workVideos } from "@/lib/utils";
 
@@ -21,7 +21,7 @@ function tagOptions(works: Work[], key: "hashtags" | "userTags") {
 }
 
 export function LibraryView() {
-  const works = useApp((s) => s.works);
+  const works = useApp((s) => s.libraryWorks);
   const kind = useApp((s) => s.kind);
   const setKind = useApp((s) => s.setKind);
   const libraryWorkId = useApp((s) => s.libraryWorkId);
@@ -67,7 +67,7 @@ export function LibraryView() {
   const downloaded = works.filter((w) => {
     if (!(w.status === "downloaded" || w.status === "stale")) return false;
     if (!matchesKind(w, kind)) return false;
-    if (libraryFolderId && libraryFolderId !== "all" && !inFolder(w, libraryFolderId)) return false;
+    if (libraryFolderId && libraryFolderId !== "all" && !libraryInFolder(w, libraryFolderId)) return false;
     return true;
   });
   const topicOptions = useMemo(() => tagOptions(downloaded, "hashtags"), [downloaded]);

@@ -12,7 +12,7 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { Button } from "@/components/ui/button";
 import { Viewer } from "@/components/viewer";
 import { isDesktop } from "@/lib/desktop";
-import { useApp } from "@/lib/store";
+import { libraryFoldersOf, libraryInFolder, useApp } from "@/lib/store";
 
 export function AppShell() {
   const tab = useApp((s) => s.tab);
@@ -24,7 +24,7 @@ export function AppShell() {
   const libraryFolderId = useApp((s) => s.libraryFolderId);
   const setLibraryFolder = useApp((s) => s.setLibraryFolder);
   const works = useApp((s) => s.works);
-  const hiddenCollectIds = useApp((s) => s.hiddenCollectIds);
+  const libraryWorks = useApp((s) => s.libraryWorks);
   const refresh = useApp((s) => s.refresh);
   const listFolders = useApp((s) => s.listFolders);
   const finishRefresh = useApp((s) => s.finishRefresh);
@@ -49,7 +49,7 @@ export function AppShell() {
             {loggedIn
               ? `${account.nickname || "已登录"}${account.douyinId ? ` · ${account.douyinId}` : ""}${isDesktop() ? " · 本机" : " · 预览"}`
               : isDesktop()
-                ? "未登录 · 可看清单和图库"
+                ? "未登录 · 可看读取和本地"
                 : "未登录 · 预览"}
           </p>
         </div>
@@ -58,13 +58,13 @@ export function AppShell() {
             className={`h-9 rounded-sm px-3 text-sm ${tab === "collect" ? "bg-surface text-fg" : "text-muted"}`}
             onClick={() => setTab("collect")}
           >
-            收藏
+            读取
           </button>
           <button
             className={`h-9 rounded-sm px-3 text-sm ${tab === "library" ? "bg-surface text-fg" : "text-muted"}`}
             onClick={() => setTab("library")}
           >
-            图库
+            本地
           </button>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -135,21 +135,16 @@ export function AppShell() {
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         {(tab === "collect" || tab === "library") && (
           <aside className="flex gap-2 overflow-x-auto border-b border-line p-3 md:w-52 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
-            {folders
-              .filter((folder) => folder.isDefault || chosenFolderIds.includes(folder.id) || chosenFolderIds.includes(folder.name))
+            {(tab === "library" ? libraryFoldersOf(libraryWorks) : folders.filter((folder) => folder.isDefault || chosenFolderIds.includes(folder.id) || chosenFolderIds.includes(folder.name)))
               .map((folder) => {
               const count =
                 tab === "library"
-                  ? works.filter(
+                  ? libraryWorks.filter(
                       (w) =>
                         (w.status === "downloaded" || w.status === "stale") &&
-                        (w.folderId === folder.id || w.alsoInFolderIds.includes(folder.id)),
+                        libraryInFolder(w, folder.id),
                     ).length
-                  : works.filter(
-                      (w) =>
-                        !hiddenCollectIds.includes(w.id) &&
-                        (w.folderId === folder.id || w.alsoInFolderIds.includes(folder.id)),
-                    ).length;
+                  : works.filter((w) => w.folderId === folder.id).length;
               const active = tab === "library" ? libraryFolderId === folder.id : folderId === folder.id;
               return (
                 <div

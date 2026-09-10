@@ -6,11 +6,14 @@ import type { Work } from "@/lib/types";
 export function DeleteConfirmDialog() {
   const ids = useApp((s) => s.deleteIds);
   const works = useApp((s) => s.works);
+  const libraryWorks = useApp((s) => s.libraryWorks);
   const error = useApp((s) => s.deleteError);
   const confirmDelete = useApp((s) => s.confirmDelete);
   const cancelDelete = useApp((s) => s.cancelDelete);
 
-  const selected = ids.map((id) => works.find((w) => w.id === id)).filter((w): w is Work => Boolean(w));
+  const selected = ids
+    .map((id) => libraryWorks.find((w) => w.id === id) || works.find((w) => w.id === id))
+    .filter((w): w is Work => Boolean(w));
   const stale = selected.filter((w) => w.status === "stale");
 
   useEffect(() => {

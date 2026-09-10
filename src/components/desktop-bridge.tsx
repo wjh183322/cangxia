@@ -14,6 +14,7 @@ export function DesktopBridge() {
           w.id === id ? { ...w, status, videoStatus: videoStatus ?? w.videoStatus } : w,
         ),
       }));
+      void useApp.getState().syncDownloadedFromDisk();
     });
     const offCount = api.onSyncCount((syncCount) => useApp.setState({ syncCount }));
     const offDone = api.onRefreshDone((data) => {

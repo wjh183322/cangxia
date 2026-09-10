@@ -26,6 +26,7 @@ export interface DesktopApi {
   }) => Promise<{ ok: boolean; path?: string; error?: string }>;
   openListFile: () => Promise<{ ok: boolean }>;
   fileStatus: (ids: string[]) => Promise<{ present: string[] }>;
+  scanLibrary: () => Promise<{ works: Work[] }>;
   refresh: (opts?: {
     folderName?: string;
     knownIds?: string[];

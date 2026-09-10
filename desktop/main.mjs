@@ -1,8 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, Notification, session, net, shell, Menu, protocol } from "electron";
-import { join } from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { readIndex, deleteWorkFolders, workDir, relocateWorkFolder, exists } from "./lib/layout.mjs";
+import { join, resolve } from "node:path";
+import { mkdir, writeFile, readdir, rm } from "node:fs/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { readIndex, deleteWorkFolders, workDir, relocateWorkFolder, exists, scanLibrary } from "./lib/layout.mjs";
+import { safeFolderName } from "./lib/paths.mjs";
 import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, unwrapAweme } from "./lib/aweme.mjs";
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
@@ -15,10 +16,16 @@ const PARTITION = "persist:cangxia-douyin";
 if (process.platform === "win32") app.setAppUserModelId("com.cangxia.app");
 
 protocol.registerSchemesAsPrivileged(
-  APP_SCHEMES.map((scheme) => ({
-    scheme,
-    privileges: { standard: true, supportFetchAPI: true, bypassCSP: true },
-  })),
+  [
+    ...APP_SCHEMES.map((scheme) => ({
+      scheme,
+      privileges: { standard: true, supportFetchAPI: true, bypassCSP: true },
+    })),
+    {
+      scheme: "cangxia-media",
+      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true, bypassCSP: true },
+    },
+  ],
 );
 
 let mainWindow = null;
@@ -85,6 +92,33 @@ let captchaLock = false;
 let lastCaptchaNotify = 0;
 
 let lastProgressPayload = null;
+
+function registerMediaProtocol() {
+  const ses = session.defaultSession;
+  try {
+    if (typeof ses.protocol.isProtocolHandled === "function" && ses.protocol.isProtocolHandled("cangxia-media")) return;
+  } catch {
+    /* continue */
+  }
+  const underRoot = (abs, root) => {
+    const a = String(abs).replace(/\\/g, "/").toLowerCase();
+    const r = String(root).replace(/\\/g, "/").toLowerCase().replace(/\/$/, "");
+    return Boolean(r) && (a === r || a.startsWith(`${r}/`));
+  };
+  ses.protocol.handle("cangxia-media", async (request) => {
+    try {
+      const u = new URL(request.url);
+      const p = decodeURIComponent(u.searchParams.get("p") || "");
+      const root = resolve(String(settings.rootPath || ""));
+      const abs = resolve(p);
+      if (!root || !p || !underRoot(abs, root)) return new Response("", { status: 403 });
+      if (!(await exists(abs))) return new Response("", { status: 404 });
+      return net.fetch(pathToFileURL(abs).href);
+    } catch {
+      return new Response("", { status: 404 });
+    }
+  });
+}
 
 function send(channel, payload) {
   mainWindow?.webContents.send(channel, payload);
@@ -2119,7 +2153,7 @@ ipcMain.handle("cangxia:set-settings", async (_e, next) => {
 });
 
 ipcMain.handle("cangxia:paths", async () => {
-  const listFile = settings.rootPath ? join(settings.rootPath, ".cangxia", "works.json") : "";
+  const listFile = settings.rootPath ? join(settings.rootPath, ".cangxia", "lists") : "";
   return {
     userData: app.getPath("userData"),
     appName: app.getName(),
@@ -2130,31 +2164,52 @@ ipcMain.handle("cangxia:paths", async () => {
 ipcMain.handle("cangxia:save-list", async (_e, payload = {}) => {
   const root = String(settings.rootPath || "").trim();
   if (!root) return { ok: false, error: "no-root" };
-  const dir = join(root, ".cangxia");
-  await mkdir(dir, { recursive: true });
-  const file = join(dir, "works.json");
+  const listsDir = join(root, ".cangxia", "lists");
+  await mkdir(listsDir, { recursive: true });
+  const folders = payload.folders || [];
+  const works = payload.works || [];
+  const keep = new Set(["_folders.json"]);
+  for (const f of folders) {
+    const name = f.isDefault || f.name === "收藏" ? "收藏" : f.name;
+    const fileName = `${safeFolderName(name)}.json`;
+    keep.add(fileName);
+    const mine = works.filter((w) => w.folderId === f.id);
+    await writeFile(
+      join(listsDir, fileName),
+      JSON.stringify({ folder: { id: f.id, name: f.name, isDefault: Boolean(f.isDefault) }, works: mine }, null, 2),
+      "utf8",
+    );
+  }
   await writeFile(
-    file,
-    JSON.stringify(
-      {
-        works: payload.works || [],
-        folders: payload.folders || [],
-        hiddenCollectIds: payload.hiddenCollectIds || [],
-        chosenFolderIds: payload.chosenFolderIds || [],
-      },
-      null,
-      2,
-    ),
+    join(listsDir, "_folders.json"),
+    JSON.stringify({ folders, chosenFolderIds: payload.chosenFolderIds || [] }, null, 2),
     "utf8",
   );
-  return { ok: true, path: file };
+  try {
+    const names = await readdir(listsDir);
+    for (const n of names) {
+      if (!n.endsWith(".json") || keep.has(n)) continue;
+      await rm(join(listsDir, n), { force: true });
+    }
+  } catch {
+    /* ignore */
+  }
+  return { ok: true, path: listsDir };
 });
 
 ipcMain.handle("cangxia:open-list-file", async () => {
-  const file = settings.rootPath ? join(settings.rootPath, ".cangxia", "works.json") : "";
-  if (!file) return { ok: false };
-  await shell.showItemInFolder(file);
+  const dir = settings.rootPath ? join(settings.rootPath, ".cangxia", "lists") : "";
+  if (!dir) return { ok: false };
+  await mkdir(dir, { recursive: true });
+  await shell.openPath(dir);
   return { ok: true };
+});
+
+ipcMain.handle("cangxia:scan-library", async () => {
+  const root = String(settings.rootPath || "").trim();
+  if (!root) return { works: [] };
+  const works = await scanLibrary(root);
+  return { works };
 });
 
 ipcMain.handle("cangxia:file-status", async (_e, ids = []) => {
@@ -2432,6 +2487,7 @@ app.whenReady().then(() => {
   blockAppSchemes(douyinSession());
   attachCdnReferer(session.defaultSession);
   attachCdnReferer(douyinSession());
+  registerMediaProtocol();
   app.on("web-contents-created", (_e, contents) => hardenContents(contents));
   createMainWindow();
   app.on("activate", () => {

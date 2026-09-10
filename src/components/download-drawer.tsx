@@ -109,7 +109,7 @@ export function DownloadDrawer() {
           {list.length === 0 ? (
             <p className="px-1 py-10 text-center text-sm text-muted">
               {tasks.length === 0
-                ? "在收藏里勾选作品后点下载，任务会出现在这里。"
+                ? "在读取里勾选作品后点下载，任务会出现在这里。"
                 : tab === "active"
                   ? "没有正在下的任务。"
                   : "还没有下完的任务。"}
