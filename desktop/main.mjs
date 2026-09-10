@@ -1445,14 +1445,15 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
     }
     let cursor = 0;
     const pageLimit = Math.max(120, Math.ceil(max / 5) + 40);
+    let emptyPages = 0;
     for (let page = 0; page < pageLimit; page += 1) {
-      if (refreshStop || !win || win.isDestroyed()) return countProgress(folderId, folderName, started);
-      if (countProgress(folderId, folderName, started) >= max || !refreshReading) return countProgress(folderId, folderName, started);
+      if (refreshStop || !win || win.isDestroyed()) return countProgress();
+      if (countProgress() >= max || !refreshReading) return countProgress();
       send("cangxia:progress", {
         active: true,
-        current: Math.min(countProgress(folderId, folderName, started), max),
+        current: Math.min(countProgress(), max),
         total: max,
-        message: `${tag} 读「收藏」 ${countProgress(folderId, folderName, started)}/${max}`,
+        message: `${tag} 读「收藏」 ${countProgress()}/${max}`,
       });
       const body = `cursor=${cursor}&count=10`;
       let res = await doRequest(win, {
@@ -1472,13 +1473,18 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
         noteHarvest(`${res.status} ${res.json?.status_code ?? ""} ${res.json?.status_msg || res.text || ""}`);
         send("cangxia:progress", {
           active: true,
-          current: countProgress(folderId, folderName, started),
+          current: countProgress(),
           total: max,
           message: `${tag} 收藏接口失败 ${lastHarvestError}`.slice(0, 90),
         });
         break;
       }
+      const before = countProgress();
       ingestPayload("https://www.douyin.com/aweme/v1/web/aweme/listcollection/", res.json);
+      if (countProgress() === before) {
+        emptyPages += 1;
+        if (emptyPages >= 2) break;
+      } else emptyPages = 0;
       const next = nextCursor(res.json, cursor);
       if (!next.hasMore) break;
       if (String(next.cursor) === String(cursor)) break;
@@ -1774,8 +1780,8 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     return;
   }
   const steps = [
-    ["页面fetch", () => harvestVia(win, ctx, signedRequest)],
     ["拦页面", () => harvestMcp(win, ctx)],
+    ["页面fetch", () => harvestVia(win, ctx, signedRequest)],
   ];
   const tried = [];
   const addedSince = (before) => {
