@@ -470,11 +470,16 @@ export const LIST_VISIBLE_FOLDERS_SCRIPT = `(() => {
 export const WORK_GRID_POINT_SCRIPT = `(() => {
   const cards = [...document.querySelectorAll("a[href*='/video'], a[href*='/note'], a[href*='/aweme']")].filter((el) => {
     const r = el.getBoundingClientRect();
-    return r.width >= 120 && r.height >= 140 && r.left > 260 && r.top > 160 && r.bottom < innerHeight;
+    return r.width >= 100 && r.height >= 120 && r.left > 180 && r.top < innerHeight - 36 && r.bottom > 140;
   });
-  if (!cards[0]) return { x: 760, y: 520 };
-  const r = cards[0].getBoundingClientRect();
-  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  cards.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  const last = cards[cards.length - 1];
+  if (!last) return { x: Math.round(innerWidth * 0.58), y: Math.round(innerHeight * 0.72) };
+  const r = last.getBoundingClientRect();
+  return {
+    x: Math.round(r.left + r.width / 2),
+    y: Math.round(Math.min(innerHeight - 48, Math.max(180, r.top + r.height * 0.55))),
+  };
 })()`;
 
 export const GRID_CARDS_SCRIPT = `(() => {
@@ -557,39 +562,49 @@ export const SCROLL_GRID_TOP_SCRIPT = `(() => {
 })()`;
 
 export const SCROLL_FEED_SCRIPT = `(() => {
-  const step = 380;
   const isScrollable = (el) => {
     const st = getComputedStyle(el);
-    return (st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") && el.scrollHeight > el.clientHeight + 40;
+    return (st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") && el.scrollHeight > el.clientHeight + 20;
   };
   const cards = [...document.querySelectorAll("a[href*='/video'], a[href*='/note'], a[href*='/aweme']")].filter((el) => {
     const r = el.getBoundingClientRect();
-    return r.width >= 120 && r.width <= 520 && r.height >= 140 && r.height <= 640;
+    return r.width >= 100 && r.height >= 120 && r.left > 160 && r.bottom > 80 && r.top < innerHeight;
   });
-  let box = null;
-  if (cards[0]) {
-    let el = cards[0].parentElement;
-    while (el && el !== document.documentElement) {
-      if (isScrollable(el) && el.clientHeight >= 280) {
-        box = el;
-        break;
-      }
-      el = el.parentElement;
+  cards.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  const last = cards[cards.length - 1];
+  const cx = last ? last.getBoundingClientRect().left + last.getBoundingClientRect().width / 2 : innerWidth * 0.58;
+  const cy = last ? Math.min(innerHeight - 40, last.getBoundingClientRect().top + last.getBoundingClientRect().height * 0.5) : innerHeight * 0.7;
+  const fire = (node, dy) => {
+    if (!node) return;
+    node.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: dy,
+      deltaMode: 0,
+      clientX: cx,
+      clientY: cy,
+      view: window,
+    }));
+  };
+  fire(last, 1600);
+  fire(document.elementFromPoint(cx, cy), 1600);
+  fire(document, 1600);
+  fire(window, 1600);
+  let moved = 0;
+  const start = last || document.body;
+  let el = start && start.parentElement;
+  while (el && el !== document.documentElement) {
+    if (isScrollable(el)) {
+      const before = el.scrollTop;
+      el.scrollTop = Math.min(el.scrollHeight, el.scrollTop + Math.max(520, Math.floor(el.clientHeight * 0.9)));
+      if (el.scrollTop > before + 4) moved += 1;
     }
+    el = el.parentElement;
   }
-  if (box) {
-    const maxTop = box.scrollHeight - box.clientHeight;
-    const next = Math.min(maxTop, box.scrollTop + step);
-    if (next <= box.scrollTop + 2) return "end";
-    box.scrollTop = next;
-    return "row";
-  }
-  const cur = window.scrollY || document.documentElement.scrollTop;
-  const maxTop = Math.max(0, document.documentElement.scrollHeight - innerHeight);
-  const next = Math.min(maxTop, cur + step);
-  if (next <= cur + 2) return "end";
-  window.scrollTo(0, next);
-  return "row";
+  const y0 = window.scrollY || document.documentElement.scrollTop;
+  window.scrollBy(0, 800);
+  const y1 = window.scrollY || document.documentElement.scrollTop;
+  return { cards: cards.length, moved, win: y1 > y0 + 2 ? "row" : moved ? "row" : "end" };
 })()`;
 
 export const LIST_SIDE_FOLDERS_SCRIPT = `(() => {

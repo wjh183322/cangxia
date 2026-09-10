@@ -595,18 +595,14 @@ async function harvestFromGrid(win, ctx) {
     return fresh;
   };
   await scrollGridTop(win);
-  for (let i = 0; i < 4 && seenThisRead.size < max; i += 1) {
-    await sleep(280);
-    await scrollGridTop(win);
-    await snap();
-  }
-  while (win && !win.isDestroyed() && !refreshStop && seenThisRead.size < max && idle < 10) {
+  await snap();
+  while (win && !win.isDestroyed() && !refreshStop && seenThisRead.size < max && idle < 16) {
+    await wheelBurst(win);
     const fresh = await snap();
     if (seenThisRead.size >= max) break;
     if (!fresh) idle += 1;
     else idle = 0;
-    await wheelBurst(win);
-    await sleep(280);
+    await sleep(200);
   }
   return seenThisRead.size;
 }
@@ -866,15 +862,25 @@ async function wheelBurst(win) {
     /* keep MCP default 640,450 */
   }
   wc.sendInputEvent({ type: "mouseMove", x, y });
-  await sleep(200);
-  for (let i = 0; i < 6; i++) {
+  await sleep(120);
+  for (let i = 0; i < 8; i++) {
     if (refreshStop || !win || win.isDestroyed()) return;
+    try {
+      const pt = await wc.executeJavaScript(WORK_GRID_POINT_SCRIPT);
+      if (pt?.x && pt?.y) {
+        x = pt.x;
+        y = pt.y;
+      }
+    } catch {
+      /* keep */
+    }
+    wc.sendInputEvent({ type: "mouseMove", x, y });
     wc.sendInputEvent({
       type: "mouseWheel",
       x,
       y,
       deltaX: 0,
-      deltaY: 2000,
+      deltaY: 900,
       canScroll: true,
     });
     try {
@@ -882,9 +888,9 @@ async function wheelBurst(win) {
     } catch {
       /* ignore */
     }
-    await sleep(500);
+    await sleep(220);
   }
-  await sleep(2000);
+  await sleep(800);
 }
 
 async function mcpClickFavorite(win) {
