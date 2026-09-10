@@ -79,11 +79,11 @@
       document.getElementById("stop").onclick = () => window.cangxiaProgress.stop();
       window.cangxiaProgress.onUpdate((job) => {
         msg.textContent = job.message || "正在读取";
-        if (job.total > 0) {
+        if (job.total > 0 && job.total < 10000) {
           count.textContent = job.current + "/" + job.total;
           fill.style.width = Math.min(100, Math.round((job.current / job.total) * 100)) + "%";
         } else {
-          count.textContent = "";
+          count.textContent = job.current > 0 ? String(job.current) : "";
           fill.style.width = job.active ? "12%" : "0";
         }
       });

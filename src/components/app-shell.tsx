@@ -104,7 +104,7 @@ export function AppShell() {
         <div className="border-b border-line bg-surface px-4 py-3">
           <div className="flex items-center justify-between gap-3 text-sm text-fg">
             <span>{job.message || "正在读取收藏"}</span>
-            {job.total > 0 && (
+            {job.total > 0 && job.total < 10000 && (
               <span className="shrink-0 tabular-nums text-muted">
                 {job.current}/{job.total}
               </span>
@@ -113,7 +113,7 @@ export function AppShell() {
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
             <div
               className="h-full rounded-full bg-fg/80 transition-[width]"
-              style={{ width: `${job.total ? Math.min(100, Math.round((job.current / job.total) * 100)) : job.active ? 8 : 0}%` }}
+              style={{ width: `${job.total > 0 && job.total < 10000 ? Math.min(100, Math.round((job.current / job.total) * 100)) : job.active ? 8 : 0}%` }}
             />
           </div>
         </div>

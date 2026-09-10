@@ -51,6 +51,7 @@ let lastHarvestMethod = "";
 let lastHarvestCount = 0;
 let lastHarvestError = "";
 let readingFolderTotal = 0;
+let readingCursor = 0;
 let netTrace = [];
 let knownSkip = new Set();
 let skippedIds = new Set();
@@ -590,12 +591,7 @@ async function harvestFromGrid(win, ctx) {
       ingestPooledOrCard(card, folder);
       if (seenThisRead.size >= max) break;
     }
-    send("cangxia:progress", {
-      active: true,
-      current: Math.min(seenThisRead.size, max),
-      total: max,
-      message: `页面格子读「${ctx.folderName}」${seenThisRead.size}/${max}`,
-    });
+    sendReadProgress(ctx.folderName, "，页面格子");
     return fresh;
   };
   await scrollGridTop(win);
@@ -744,8 +740,29 @@ function countInFolder(folderId) {
   return n;
 }
 
-function countProgress() {
-  return seenThisRead.size;
+function progressTotal() {
+  if (Number(readingFolderTotal) > 0) return Number(readingFolderTotal);
+  const n = Number(readingMax);
+  if (n > 0 && n < 10000) return n;
+  return 0;
+}
+
+function progressLabel(folderName, extra = "") {
+  const got = countProgress();
+  const total = progressTotal();
+  return total
+    ? `读「${folderName}」 ${got}/${total}${extra}`
+    : `读「${folderName}」 ${got}条${extra}`;
+}
+
+function sendReadProgress(folderName, extra = "") {
+  const total = progressTotal();
+  send("cangxia:progress", {
+    active: true,
+    current: countProgress(),
+    total,
+    message: progressLabel(folderName, extra),
+  });
 }
 
 async function drainPageFeeds(win) {
@@ -769,20 +786,21 @@ async function drainPageFeeds(win) {
   }
 }
 
-async function waitForNewItems(prevCount, timeoutMs, folderName, folderId, started, max) {
+async function waitForNewItems(prevCount, timeoutMs, folderName) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs && !refreshStop) {
-    const got = countProgress(folderId, folderName, started);
+    const got = countProgress();
     send("cangxia:progress", {
       active: true,
-      current: Math.min(got, max),
-      total: max,
-      message: `正在读取「${folderName}」 ${got}/${max}${skippedIds.size ? `，清单已有 ${skippedIds.size} 条先跳过` : ""}`,
+      current: got,
+      total: progressTotal(),
+      message: progressLabel(folderName),
     });
-    if (got >= max) return true;
+    if (readingFolderTotal && got >= readingFolderTotal) return true;
+    if (Number(readingMax) < 10000 && got >= Number(readingMax)) return true;
     await sleep(200);
   }
-  return countProgress(folderId, folderName, started) > prevCount;
+  return countProgress() > prevCount;
 }
 
 async function openFavoriteFresh(win) {
@@ -855,7 +873,12 @@ async function wheelBurst(win) {
       deltaY: 2000,
       canScroll: true,
     });
-    await sleep(600);
+    try {
+      await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
+    } catch {
+      /* ignore */
+    }
+    await sleep(500);
   }
   await sleep(2000);
 }
@@ -1388,12 +1411,7 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
     return countProgress(folderId, folderName, started);
   }
 
-  send("cangxia:progress", {
-    active: true,
-    current: 0,
-    total: max,
-    message: `${tag} 列出收藏夹，定位「${folderName}」`,
-  });
+  sendReadProgress(folderName, "，列出收藏夹");
   const listRes = await doRequest(win, {
     method: "GET",
     path: "https://www.douyin.com/aweme/v1/web/collects/list/",
@@ -1407,12 +1425,7 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
   const id = String(hit?.id || readingCollectsId || folderIdByName(folderName) || "");
   if (!id || id.startsWith("folder_")) {
     if (!lastHarvestError) noteHarvest(`没拿到「${folderName}」id`);
-    send("cangxia:progress", {
-      active: true,
-      current: 0,
-      total: max,
-      message: `${tag} ${lastHarvestError}`.slice(0, 90),
-    });
+    sendReadProgress(folderName);
     await sleep(800);
     return 0;
   }
@@ -1430,12 +1443,7 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
     const got = countProgress();
     if (got >= max) return got;
     if (folderTotal && got >= folderTotal) break;
-    send("cangxia:progress", {
-      active: true,
-      current: got,
-      total: folderTotal || Math.max(got, 1),
-      message: `${tag} 读「${folderName}」 ${got}/${folderTotal || "…"}`,
-    });
+    sendReadProgress(folderName);
     const url = `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`;
     const res = await doRequest(win, {
       method: "GET",
@@ -1446,12 +1454,7 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
       failStreak += 1;
       noteHarvest(`${res.status} ${res.json?.status_msg || res.text || "blocked"}`);
       emitCaptcha("refresh");
-      send("cangxia:progress", {
-        active: true,
-        current: countProgress(),
-        total: folderTotal || 1,
-        message: "遇到验证码，过完滑块后会自动接着读",
-      });
+      sendReadProgress(folderName, "，验证码");
       await waitWhilePaused();
       if (refreshStop) return countProgress();
       await sleep(Math.min(5000, 900 * failStreak));
@@ -1461,12 +1464,7 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
     if (!jsonOk(res.json)) {
       failStreak += 1;
       noteHarvest(`${res.status} ${res.json?.status_code ?? ""} ${res.json?.status_msg || res.text || ""}`);
-      send("cangxia:progress", {
-        active: true,
-        current: countProgress(),
-        total: folderTotal || 1,
-        message: `${tag} 这一页失败，重试 ${failStreak}`.slice(0, 90),
-      });
+      sendReadProgress(folderName, `，重试 ${failStreak}`);
       if (failStreak >= 8) break;
       await sleep(Math.min(5000, 700 * failStreak));
       page -= 1;
@@ -1504,27 +1502,84 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
     const next = nextCursor(res.json, cursor);
     if (next.cursor != null && String(next.cursor) !== String(cursor)) cursor = next.cursor;
     else cursor = Number(cursor) + Math.max(batch.length, pageSize);
+    readingCursor = cursor;
     await sleep(700);
   }
   rankCapturedByCollectTime(folderId);
   return countProgress();
 }
 
-async function harvestByIntercept(win, { folderId, folderName, max, started }) {
+async function continueFolderInPage(win, { folderId, folderName, max, started }) {
+  const id = String(readingCollectsId || folderIdByName(folderName) || "");
+  readingInside = true;
+  refreshReading = true;
+  if (id && !id.startsWith("folder_")) {
+    sendReadProgress(folderName, "，打开夹");
+    const url = `${FAVORITE_FOLDER_LIST_URL}&collects_id=${id}`;
+    try {
+      await win.loadURL(url, { userAgent: CHROME_UA });
+    } catch {
+      /* keep current page */
+    }
+    await sleep(2200);
+  }
+  await openNamedFolder(win, folderName, { skipNav: true });
+  readingInside = true;
+  const folder = ensureFolder(folderName, id);
+  let cursor = readingCursor || countProgress();
+  let empty = 0;
+  for (let page = 0; page < 2000; page += 1) {
+    await waitWhilePaused();
+    if (refreshStop || !win || win.isDestroyed()) break;
+    const got = countProgress();
+    if (got >= max || (readingFolderTotal && got >= readingFolderTotal)) break;
+    sendReadProgress(folderName, "，页面接口续翻");
+    const query = { collects_id: id, cursor: String(cursor), count: "10" };
+    let res = await hookedRequest(win, {
+      method: "GET",
+      path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
+      query,
+    });
+    if (!jsonOk(res.json) || !collectAwemes(res.json).length) {
+      res = await signedRequest(win, {
+        method: "GET",
+        path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
+        query,
+      });
+    }
+    const batch = collectAwemes(res.json);
+    if (jsonOk(res.json) && batch.length) {
+      ingestPayload(
+        `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`,
+        res.json,
+      );
+      empty = 0;
+      const next = nextCursor(res.json, cursor);
+      cursor = next.cursor != null && String(next.cursor) !== String(cursor) ? next.cursor : Number(cursor) + Math.max(batch.length, 10);
+      readingCursor = cursor;
+    } else {
+      empty += 1;
+      cursor = Number(cursor) + 10;
+      readingCursor = cursor;
+      if (empty >= 5) break;
+    }
+    await sleep(500);
+  }
+  if (readingFolderTotal && countProgress() >= readingFolderTotal) return countProgress();
+  return harvestByIntercept(win, { folderId, folderName, max, started, folder });
+}
+
+async function harvestByIntercept(win, { folderId, folderName, max, started, folder }) {
   refreshReading = true;
   readingInside = true;
-  const target = readingFolderTotal || max;
-  const remain = Math.max(0, target - countProgress());
+  const target = progressTotal() || max;
+  const remain = Math.max(0, (readingFolderTotal || max) - countProgress());
   const deadline = Date.now() + Math.min(20 * 60 * 1000, 120000 + remain * 500);
-  send("cangxia:progress", {
-    active: true,
-    current: countProgress(),
-    total: target,
-    message: `在夹里续读「${folderName}」 ${countProgress()}/${target}`,
-  });
+  const folderRef = folder || ensureFolder(folderName, readingCollectsId);
+  sendReadProgress(folderName, "，夹里滚动");
   await drainPageFeeds(win);
   let got = countProgress();
-  if (got < max) await waitForNewItems(got, 8000, folderName, folderId, started, max);
+  if (got < max) await waitForNewItems(got, 8000, folderName);
   got = countProgress();
   if (got >= max || (readingFolderTotal && got >= readingFolderTotal)) return got;
   let idle = 0;
@@ -1532,23 +1587,24 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
     while (refreshPaused && !refreshStop) await sleep(400);
     if (refreshStop || !win || win.isDestroyed() || Date.now() > deadline) break;
     got = countProgress();
-    send("cangxia:progress", {
-      active: true,
-      current: got,
-      total: target,
-      message: `在夹里续读「${folderName}」 ${got}/${target}`,
-    });
+    sendReadProgress(folderName, "，夹里滚动");
     if (got >= max || (readingFolderTotal && got >= readingFolderTotal)) break;
     const before = got;
     const skipBefore = skippedIds.size;
     await drainPageFeeds(win);
+    try {
+      const cards = await win.webContents.executeJavaScript(GRID_CARDS_SCRIPT);
+      for (const card of cards || []) ingestPooledOrCard(card, folderRef);
+    } catch {
+      /* ignore */
+    }
     await wheelBurst(win);
     await drainPageFeeds(win);
-    const grew = await waitForNewItems(before, 3500, folderName, folderId, started, max);
+    const grew = await waitForNewItems(before, 3500, folderName);
     await drainPageFeeds(win);
     got = countProgress();
     if (got >= max || (readingFolderTotal && got >= readingFolderTotal)) break;
-    if (grew || skippedIds.size > skipBefore) idle = 0;
+    if (grew || skippedIds.size > skipBefore || got > before) idle = 0;
     else idle += 1;
     const needMore = readingFolderTotal && got < readingFolderTotal;
     if (!needMore && !readingHasMore && idle >= 6) break;
@@ -1558,24 +1614,14 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
 }
 
 async function openNamedFolder(win, folderName, { skipNav = false } = {}) {
-  send("cangxia:progress", {
-    active: true,
-    current: 0,
-    total: 1,
-    message: skipNav ? `正在点进「${folderName}」` : `正在打开收藏夹，准备点进「${folderName}」`,
-  });
+  sendReadProgress(folderName, skipNav ? "，点进夹" : "，打开收藏夹");
   if (!skipNav) {
     await win.webContents.executeJavaScript(OPEN_FAVORITE_SCRIPT);
     await sleep(2500);
     await win.webContents.executeJavaScript(CLICK_FOLDER_TAB_SCRIPT);
     await sleep(2500);
   }
-  send("cangxia:progress", {
-    active: true,
-    current: 0,
-    total: 1,
-    message: `正在点进「${folderName}」`,
-  });
+  sendReadProgress(folderName, "，点进夹");
   await sleep(400);
   for (let attempt = 0; attempt < 8; attempt += 1) {
     if (refreshStop || !win || win.isDestroyed()) return "none";
@@ -1628,27 +1674,16 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   lastHarvestCount = 0;
   netTrace = [];
   readingFolderTotal = 0;
+  readingCursor = 0;
   const ctx = { folderId, folderName, max, started, label: "" };
   if (folderName !== "收藏") {
-    send("cangxia:progress", {
-      active: true,
-      current: 0,
-      total: max,
-      message: `接口读「${folderName}」全部进清单`,
-    });
+    sendReadProgress(folderName);
     await waitPageReady(win, folderName);
     let added = await harvestVia(win, { ...ctx, label: "接口" }, signedRequest);
     const total = readingFolderTotal || 0;
     if (added > 0 && total && added < total && !refreshStop && win && !win.isDestroyed()) {
-      send("cangxia:progress", {
-        active: true,
-        current: added,
-        total,
-        message: `接口 ${added}/${total}，点进夹继续滚`,
-      });
-      await openNamedFolder(win, folderName);
-      readingInside = true;
-      added = await harvestByIntercept(win, { folderId, folderName, max, started });
+      sendReadProgress(folderName, "，接口停了接着翻");
+      added = await continueFolderInPage(win, { folderId, folderName, max, started });
     }
     lastHarvestCount = added;
     lastHarvestMethod = added
