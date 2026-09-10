@@ -1449,9 +1449,10 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
       /* ignore folder list */
     }
     let cursor = 0;
-    for (let page = 0; page < 80; page += 1) {
+    const pageLimit = Math.max(120, Math.ceil(max / 5) + 40);
+    for (let page = 0; page < pageLimit; page += 1) {
       if (refreshStop || !win || win.isDestroyed()) return countProgress(folderId, folderName, started);
-      if (countProgress(folderId, folderName, started) >= max) return countProgress(folderId, folderName, started);
+      if (countProgress(folderId, folderName, started) >= max || !refreshReading) return countProgress(folderId, folderName, started);
       send("cangxia:progress", {
         active: true,
         current: Math.min(countProgress(folderId, folderName, started), max),
@@ -1775,8 +1776,8 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     return;
   }
   const steps = [
-    ["拦页面", () => harvestMcp(win, ctx)],
     ["页面fetch", () => harvestVia(win, ctx, signedRequest)],
+    ["拦页面", () => harvestMcp(win, ctx)],
   ];
   const tried = [];
   const addedSince = (before) => {
@@ -1813,17 +1814,28 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
       const before = new Set(captured.keys());
       await run();
       const added = addedSince(before);
+      const got = countProgress(folderId, folderName, started);
       if (added > 0) {
-        tried.push(`${label} 读到${added}条`);
+        tried.push(`${label} 读到${got}条`);
         lastHarvestMethod = tried.join(" → ");
-        lastHarvestCount = added;
+        lastHarvestCount = got;
         send("cangxia:progress", {
           active: true,
-          current: Math.min(added, max),
+          current: Math.min(got, max),
           total: max,
           message: lastHarvestMethod,
         });
-        return;
+        if (got >= max || refreshStop) return;
+        const next = steps[i + 1];
+        if (!next) return;
+        send("cangxia:progress", {
+          active: true,
+          current: Math.min(got, max),
+          total: max,
+          message: `${lastHarvestMethod} → 不够 ${max}，接着${next[0]}`,
+        });
+        await sleep(600);
+        continue;
       }
       tried.push(lastHarvestError ? `${label} 没过(${lastHarvestError})` : `${label} 没过`);
       lastHarvestMethod = tried.join(" → ");
