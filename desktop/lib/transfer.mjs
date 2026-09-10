@@ -112,24 +112,6 @@ export async function mp4HasAudio(dest) {
     return false;
   }
 }
-  try {
-    const fh = await open(dest, "r");
-    const buf = Buffer.alloc(16);
-    const { bytesRead } = await fh.read(buf, 0, 16, 0);
-    await fh.close();
-    if (bytesRead < 8) return "empty";
-    if (buf[0] === 0xff && buf[1] === 0xd8) return "jpeg";
-    if (buf[0] === 0x89 && buf.slice(1, 4).toString("latin1") === "PNG") return "png";
-    if (buf.slice(0, 4).toString("latin1") === "RIFF" && buf.slice(8, 12).toString("latin1") === "WEBP") return "webp";
-    if (buf.slice(4, 8).toString("latin1") === "ftyp") return "mp4";
-    if (buf[0] === 0x1a && buf[1] === 0x45) return "webm";
-    const head = buf.slice(0, 12).toString("utf8");
-    if (head.includes("<") || head.includes("{") || head.startsWith("http")) return "html";
-    return "unknown";
-  } catch {
-    return "empty";
-  }
-}
 
 export async function removePartial(dest) {
   try {
