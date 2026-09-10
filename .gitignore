@@ -14,3 +14,4 @@ screenshots/
 .cangxia/
 desktop/ui/
 desktop/dist-win/
+node_modules
