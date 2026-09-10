@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ensureWorkFolder, readIndex, writeIndex, folderTitle, deleteWorkFolders, exists, relocateWorkFolder } from "./layout.mjs";
-import { mapAweme, collectAwemes, mergeWorks, isCollectFeedUrl, isFolderListUrl } from "./aweme.mjs";
+import { mapAweme, unwrapAweme, collectAwemes, mergeWorks, isCollectFeedUrl, isFolderListUrl } from "./aweme.mjs";
 
 test("folderTitle strips illegal chars and keeps id", () => {
   assert.equal(folderTitle("a/b:c|d", "123"), "abcd_123");
@@ -69,8 +69,15 @@ test("mapAweme keeps collects_time and marks unknown", () => {
     { aweme_id: "2", desc: "b", images: [{ url_list: ["https://x/b.jpg"] }] },
     { id: "f", name: "玛丽罗斯" },
   );
-  assert.equal(unknown.collectTimeKnown, false);
-  assert.equal(unknown.collectedAt, 0);
+  const wrapped = mapAweme(
+    unwrapAweme({
+      aweme_info: { aweme_id: "3", desc: "c", images: [{ url_list: ["https://x/c.jpg"] }] },
+      last_collect_time: 1710000001,
+    }),
+    { id: "f", name: "玛丽罗斯" },
+  );
+  assert.equal(wrapped.collectTimeKnown, true);
+  assert.equal(wrapped.collectedAt, 1710000001000);
 });
 
 test("mapAweme album skips download_url_list watermark and uses url_list", () => {

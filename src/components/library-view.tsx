@@ -395,17 +395,8 @@ export function LibraryView() {
                   <div className="relative aspect-portrait bg-raised">
                     <img src={w.coverUrl} alt="" className="size-full object-cover" />
                     {kindChip(w) && (
-                      <span
-                        className={`absolute left-2 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] text-fg ${
-                          w.collectTimeKnown === false ? "top-9" : "top-2"
-                        }`}
-                      >
+                      <span className="absolute left-2 top-2 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] text-fg">
                         {kindChip(w)}
-                      </span>
-                    )}
-                    {w.collectTimeKnown === false && (
-                      <span className="absolute left-2 top-2 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] text-warn">
-                        无收藏时间
                       </span>
                     )}
                     {tidyArmed && (

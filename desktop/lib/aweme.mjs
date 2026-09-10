@@ -203,6 +203,30 @@ function mediaFrom(aweme) {
   return { kind, images, videos };
 }
 
+function pickCollectTime(raw, inner) {
+  const extra = inner?.extra || raw?.extra || {};
+  const candidates = [
+    raw?._collect_time,
+    raw?.collects_time,
+    raw?.collect_time,
+    raw?.collected_time,
+    raw?.last_collect_time,
+    raw?.collect_ts,
+    inner?._collect_time,
+    inner?.collects_time,
+    inner?.collect_time,
+    inner?.collected_time,
+    inner?.last_collect_time,
+    extra.collects_time,
+    extra.collect_time,
+  ];
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
 export function mapAweme(aweme, folder) {
   const id = String(aweme.aweme_id || aweme.id || "");
   const { kind, images, videos } = mediaFrom(aweme);
@@ -213,7 +237,7 @@ export function mapAweme(aweme, folder) {
   let status = "new";
   if (!stillsOk && kind === "album") status = "no-origin";
   if ((kind === "video" || kind === "mixed") && !stillsOk && !videos.length) status = "no-origin";
-  const rawTime = Number(aweme._collect_time || aweme.collects_time || aweme.collect_time || 0);
+  const rawTime = pickCollectTime(aweme, aweme);
   const collectedAt = rawTime > 1e12 ? rawTime : rawTime > 1e9 ? rawTime * 1000 : 0;
   return {
     id,
@@ -244,7 +268,7 @@ export function unwrapAweme(raw) {
   const id = String(inner.aweme_id || inner.id || raw.aweme_id || "");
   if (!id) return null;
   inner.collects_id = inner.collects_id || raw.collects_id || raw.collection_id || "";
-  inner._collect_time = Number(raw.collects_time || raw.collect_time || inner.collects_time || inner.collect_time || 0);
+  inner._collect_time = pickCollectTime(raw, inner);
   return inner;
 }
 
