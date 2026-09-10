@@ -14,6 +14,7 @@ function electronHtml(): Plugin {
 
 export default defineConfig({
   root: resolve("desktop/ui-src"),
+  publicDir: resolve("public"),
   base: "./",
   plugins: [viteReact(), tailwindcss(), electronHtml()],
   resolve: {

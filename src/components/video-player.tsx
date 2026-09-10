@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { Maximize2, Minimize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function formatTime(sec: number) {
@@ -26,6 +26,7 @@ export function VideoPlayer({
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
   const [broken, setBroken] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     const el = ref.current;
@@ -35,11 +36,23 @@ export function VideoPlayer({
     setPlaying(false);
     setCurrent(0);
     setBroken(false);
+    setFullscreen(false);
     if (autoPlay) {
       el.muted = muted;
       void el.play();
     }
   }, [src, autoPlay]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape" || !fullscreen) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setFullscreen(false);
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [fullscreen]);
 
   function togglePlay() {
     const el = ref.current;
@@ -67,8 +80,14 @@ export function VideoPlayer({
   }
 
   return (
-    <div className={cn("overflow-hidden bg-bg", fill && "flex h-full min-h-0 flex-col")}>
-      <div className={cn("relative bg-bg", fill ? "min-h-0 flex-1" : "aspect-video")}>
+    <div
+      className={cn(
+        "overflow-hidden bg-bg",
+        fullscreen && "fixed inset-0 z-[80] flex flex-col",
+        fill && !fullscreen && "flex h-full min-h-0 flex-col",
+      )}
+    >
+      <div className={cn("relative bg-bg", fullscreen || fill ? "min-h-0 flex-1" : "aspect-video")}>
         <video
           ref={ref}
           className="size-full object-contain"
@@ -108,6 +127,15 @@ export function VideoPlayer({
             </span>
           </button>
         )}
+        {fullscreen && (
+          <button
+            type="button"
+            className="absolute right-4 top-4 z-10 h-11 rounded-md bg-bg/80 px-3 text-sm text-fg"
+            onClick={() => setFullscreen(false)}
+          >
+            退出全屏
+          </button>
+        )}
       </div>
       <div className="flex items-center gap-2 border-t border-line bg-surface px-3 py-2">
         <button
@@ -118,9 +146,7 @@ export function VideoPlayer({
         >
           {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
         </button>
-        <span className="w-16 shrink-0 text-xs tabular-nums text-muted">
-          {formatTime(current)}
-        </span>
+        <span className="w-16 shrink-0 text-xs tabular-nums text-muted">{formatTime(current)}</span>
         <input
           type="range"
           min={0}
@@ -131,9 +157,7 @@ export function VideoPlayer({
           className={cn("h-1 min-w-0 flex-1 cursor-pointer accent-accent")}
           aria-label="进度"
         />
-        <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted">
-          {formatTime(duration)}
-        </span>
+        <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted">{formatTime(duration)}</span>
         <button
           type="button"
           className="flex size-9 items-center justify-center rounded-md text-fg hover:bg-raised"
@@ -141,6 +165,14 @@ export function VideoPlayer({
           aria-label={muted ? "取消静音" : "静音"}
         >
           {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+        </button>
+        <button
+          type="button"
+          className="flex size-9 items-center justify-center rounded-md text-fg hover:bg-raised"
+          onClick={() => setFullscreen((v) => !v)}
+          aria-label={fullscreen ? "退出全屏" : "全屏"}
+        >
+          {fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
         </button>
       </div>
     </div>

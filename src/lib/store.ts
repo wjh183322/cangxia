@@ -861,6 +861,12 @@ export const useApp = create<AppState>()(
           state.folders = cleaned.folders;
           state.folderId = cleaned.folderId;
           state.dlTasks = hydrateTasks(cleaned.dlTasks || []);
+        } else if (!state.works?.length) {
+          state.works = WORKS;
+          state.folders = FOLDERS;
+          state.chosenFolderIds = FOLDERS.filter((f) => !f.isDefault).map((f) => f.id);
+          state.loggedIn = true;
+          state.account = DEMO_USER;
         }
         state.hiddenCollectIds = state.hiddenCollectIds || [];
         state.deletedFolderIds = state.deletedFolderIds || [];

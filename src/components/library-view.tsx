@@ -1,14 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Play } from "lucide-react";
 import { BrowseOverlay } from "@/components/browse-overlay";
 import { KindTabs, kindHint } from "@/components/kind-tabs";
 import { StatusBadge } from "@/components/status-badge";
 import { TagPickerDialog } from "@/components/tag-picker-dialog";
-import { VideoPlayer } from "@/components/video-player";
 import { Button } from "@/components/ui/button";
 import { isDesktop } from "@/lib/desktop";
 import { inFolder, useApp } from "@/lib/store";
 import type { Work } from "@/lib/types";
-import { folderTitle, kindChip, matchesKind, compareCollectTime, videoStatusOf, workVideos } from "@/lib/utils";
+import { folderTitle, kindChip, matchesKind, compareCollectTime, videoStatusOf, workSlides, workVideos } from "@/lib/utils";
 
 function tagOptions(works: Work[], key: "hashtags" | "userTags") {
   const counts = new Map<string, number>();
@@ -34,6 +34,7 @@ export function LibraryView() {
   const folders = useApp((s) => s.folders);
   const libraryFolderId = useApp((s) => s.libraryFolderId);
   const setViewerIndex = useApp((s) => s.setViewerIndex);
+  const viewerIndex = useApp((s) => s.viewerIndex);
   const addUserTag = useApp((s) => s.addUserTag);
   const applyTagFilter = useApp((s) => s.applyTagFilter);
   const clearLibraryFilters = useApp((s) => s.clearLibraryFilters);
@@ -53,6 +54,15 @@ export function LibraryView() {
   const [draftTag, setDraftTag] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTab, setPickerTab] = useState<"topic" | "user">("topic");
+
+  useEffect(() => {
+    if (!libraryWorkId || viewerIndex !== null || browseWorkId) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") openLibraryWork(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [libraryWorkId, viewerIndex, browseWorkId, openLibraryWork]);
 
   const downloaded = works.filter((w) => {
     if (!(w.status === "downloaded" || w.status === "stale")) return false;
@@ -174,42 +184,40 @@ export function LibraryView() {
             ))}
           </div>
           <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6">
-            {work.images.map((img, i) => (
-              <li key={img.id}>
+            {workSlides(work).map((slide, i) => (
+              <li key={slide.key}>
                 <button
                   type="button"
-                  className="aspect-portrait w-full overflow-hidden rounded-md border border-line"
+                  className="relative aspect-portrait w-full overflow-hidden rounded-md border border-line"
                   onClick={() => setViewerIndex(i)}
                 >
-                  <img src={img.url} alt="" className="size-full object-cover" />
+                  <img
+                    src={slide.type === "image" ? slide.url : work.images[0]?.url || work.coverUrl}
+                    alt=""
+                    className="size-full object-cover"
+                  />
+                  {slide.type === "video" && (
+                    <span className="absolute inset-0 flex items-center justify-center bg-bg/25">
+                      <span className="flex size-11 items-center justify-center rounded-full bg-accent text-accent-fg">
+                        <Play className="size-5 translate-x-0.5 fill-current" />
+                      </span>
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
           </ul>
-          {workVideos(work).length > 0 && (
-            <div className="mt-4 space-y-3">
-              {videoStatusOf(work) === "saved"
-                ? workVideos(work).map((clip, i) => (
-                    <div key={clip.id} className="overflow-hidden rounded-lg border border-line">
-                      <p className="border-b border-line px-3 py-2 text-xs text-muted">
-                        视频{i + 1}.mp4
-                      </p>
-                      <VideoPlayer src={clip.url} poster={work.images[i]?.url || work.coverUrl} />
-                    </div>
-                  ))
-                : (
-                  <p className="rounded-lg border border-line px-4 py-10 text-center text-sm text-muted">
-                    原视频未保存，无法播放
-                  </p>
-                )}
-              <p className="text-xs text-subtle">
-                {isDesktop()
-                  ? "无水印原视频 · 内置播放，带原声。图和视频都在同一作品文件夹。"
-                  : "预览片段没有音轨所以无声。本机下载的原视频会带原声。图和多段视频都下进同一文件夹。"}
-              </p>
-            </div>
+          {workVideos(work).length > 0 && videoStatusOf(work) !== "saved" && (
+            <p className="mt-3 rounded-lg border border-line px-4 py-6 text-center text-sm text-muted">
+              原视频未保存，无法播放
+            </p>
           )}
-          <p className="mt-3 text-xs text-subtle">点话题或自打标签可筛选同类作品。点图片进入单图浏览。</p>
+          <p className="mt-3 text-xs text-subtle">
+            {isDesktop()
+              ? "视频和图一样大，中间播放键。点开放大播，全屏只在藏匣窗口里。"
+              : "点图或视频放大。预览片段可能无声；本机原视频有声。"}
+          </p>
+          <p className="mt-1 text-xs text-subtle">点话题或自打标签可筛选同类作品。</p>
         </div>
       </div>
     );

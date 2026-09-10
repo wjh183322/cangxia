@@ -3,7 +3,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { listWorks, useApp } from "@/lib/store";
 import { folderTitle, kindChip } from "@/lib/utils";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function CollectView() {
   const works = useApp((s) => s.works);
@@ -21,6 +21,15 @@ export function CollectView() {
   const hideFromCollect = useApp((s) => s.hideFromCollect);
   const hideFolderFromCollect = useApp((s) => s.hideFolderFromCollect);
   const [confirmAll, setConfirmAll] = useState(false);
+
+  useEffect(() => {
+    if (!confirmAll) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setConfirmAll(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmAll]);
 
   const list = listWorks(works, folderId, kind, hiddenCollectIds);
   const folderName = folders.find((f) => f.id === folderId)?.name || "收藏";
@@ -75,22 +84,34 @@ export function CollectView() {
         >
           移出清单（{selectedIds.length}）
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => setConfirmAll(true)} disabled={folderCount === 0}>
+        <Button size="sm" variant="secondary" onClick={() => setConfirmAll(true)} disabled={folderCount === 0}>
           全部移出当前夹
         </Button>
       </div>
 
       {confirmAll && (
-        <div className="flex flex-wrap items-center gap-3 border-b border-line bg-surface px-4 py-3 text-sm">
-          <p>
-            从清单移出「{folderName}」全部 {folderCount} 条，图库和硬盘文件不动。
-          </p>
-          <Button size="sm" onClick={() => { hideFolderFromCollect(folderId); setConfirmAll(false); }}>
-            确认移出
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setConfirmAll(false)}>
-            取消
-          </Button>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-bg/70 p-4 sm:items-center">
+          <div className="w-full max-w-md rounded-xl border border-line bg-surface p-6">
+            <p className="text-xs font-medium text-muted">移出清单</p>
+            <h2 className="mt-2 text-lg font-semibold">全部移出「{folderName}」</h2>
+            <p className="mt-3 text-sm leading-relaxed text-muted">
+              从清单移出全部 {folderCount} 条。图库和硬盘文件不动，只是收藏页不再显示。
+            </p>
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+              <Button
+                className="flex-1"
+                onClick={() => {
+                  hideFolderFromCollect(folderId);
+                  setConfirmAll(false);
+                }}
+              >
+                确认移出
+              </Button>
+              <Button className="flex-1" variant="secondary" onClick={() => setConfirmAll(false)}>
+                取消
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

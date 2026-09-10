@@ -73,13 +73,17 @@ export function AppShell() {
               停止（已读 {syncCount.works}）
             </Button>
           )}
-          <Button size="sm" variant="secondary" onClick={() => void listFolders()} disabled={job.active && !syncingBrowser}>
-            读取收藏夹
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => void refresh()} disabled={job.active && !syncingBrowser}>
-            <RefreshCw className={`size-4 ${job.active ? "animate-spin" : ""}`} />
-            读取收藏
-          </Button>
+          {tab === "collect" && (
+            <>
+              <Button size="sm" variant="secondary" onClick={() => void listFolders()} disabled={job.active && !syncingBrowser}>
+                读取收藏夹
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => void refresh()} disabled={job.active && !syncingBrowser}>
+                <RefreshCw className={`size-4 ${job.active ? "animate-spin" : ""}`} />
+                读取收藏
+              </Button>
+            </>
+          )}
           <DownloadMiniBar />
           <Button size="icon" variant="ghost" onClick={() => setSettingsOpen(true)} aria-label="设置">
             <Settings className="size-4" />
