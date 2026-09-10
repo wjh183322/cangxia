@@ -15,7 +15,7 @@ import {
 } from "./download";
 import { abortDesktop, kickDownload } from "./download-pump";
 import type { AppTab, DownloadJob, Folder, FolderPickItem, KindFilter, Settings, Work } from "./types";
-import { applyDeletedWorks, matchesKind, videoStatusOf, workNeedsDownload } from "./utils";
+import { applyDeletedWorks, compareCollectTime, matchesKind, videoStatusOf, workNeedsDownload } from "./utils";
 
 interface AppState {
   loggedIn: boolean;
@@ -68,6 +68,9 @@ interface AppState {
   pendingReadAfterLogin: boolean;
   pendingListFoldersAfterLogin: boolean;
   lastRead: { method: string; folder: string; count: number } | null;
+  readModeOpen: boolean;
+  readModeError: string;
+  readModeCount: string;
   login: () => Promise<void>;
   logout: () => Promise<void>;
   openLoginGate: () => void;
@@ -114,9 +117,12 @@ interface AppState {
   setDlExpanded: (id: string | null) => void;
   openWorkFolder: (workId: string) => void;
   refresh: () => Promise<void>;
+  confirmReadMode: (mode: "all" | "limit") => void;
+  cancelReadMode: () => void;
+  setReadModeCount: (value: string) => void;
   listFolders: () => Promise<void>;
   finishRefresh: () => Promise<void>;
-  applyRefreshResult: (folders: Folder[], works: Work[]) => void;
+  applyRefreshResult: (folders: Folder[], works: Work[], extra?: { folder?: string }) => void;
   openFolderPick: (folders: FolderPickItem[]) => void;
   toggleFolderPick: (id: string) => void;
   setFolderPickAll: (on: boolean) => void;
@@ -137,7 +143,7 @@ const defaultSettings: Settings = {
   rootPath: "D:\\藏匣",
   pushplusToken: "",
   wxpusherSpt: "",
-  maxPerRefresh: 300,
+  maxPerRefresh: 20,
 };
 
 function emptyFolders(): Folder[] {
@@ -168,11 +174,13 @@ export { inFolder };
 
 export function listWorks(works: Work[], folderId: string, kind: KindFilter, hiddenIds: string[] = []) {
   const hidden = new Set(hiddenIds);
-  const rank = (w: Work) =>
-    folderId === "default" || folderId === "all" ? (w.allIndex ?? 1e12) : (w.listIndex ?? 1e12);
+  const isDefault = folderId === "default" || folderId === "all";
   return works
     .filter((w) => !hidden.has(w.id) && inFolder(w, folderId) && matchesKind(w, kind))
-    .sort((a, b) => rank(a) - rank(b) || b.collectedAt - a.collectedAt);
+    .sort((a, b) => {
+      if (isDefault) return (a.allIndex ?? 1e12) - (b.allIndex ?? 1e12) || b.collectedAt - a.collectedAt;
+      return compareCollectTime(a, b);
+    });
 }
 
 export const useApp = create<AppState>()(
@@ -228,6 +236,9 @@ export const useApp = create<AppState>()(
       pendingReadAfterLogin: false,
       pendingListFoldersAfterLogin: false,
       lastRead: null,
+      readModeOpen: false,
+      readModeError: "",
+      readModeCount: String(20),
 
       login: async () => {
         const api = desktop();
@@ -525,50 +536,31 @@ export const useApp = create<AppState>()(
           set({ loginGate: true, pendingReadAfterLogin: true });
           return;
         }
-        const api = desktop();
-        if (api) {
-          await api.setSettings(get().settings);
-          const folderName = get().folders.find((f) => f.id === get().folderId)?.name || "收藏";
-          const works = get().works;
-          const folderId = get().folderId;
-          const hidden = new Set(get().hiddenCollectIds || []);
-          const visible = works.filter((w) => !hidden.has(w.id));
-          const knownIds =
-            folderName === "收藏"
-              ? visible.filter((w) => w.allIndex != null).map((w) => w.id)
-              : visible.filter((w) => inFolder(w, folderId)).map((w) => w.id);
-          const startAllIndex = visible.reduce((m, w) => Math.max(m, w.allIndex ?? -1), -1) + 1;
-          const startListIndex =
-            visible.filter((w) => inFolder(w, folderId)).reduce((m, w) => Math.max(m, w.listIndex ?? -1), -1) + 1;
-          set({
-            job: {
-              active: true,
-              current: 0,
-              total: Math.max(1, get().settings.maxPerRefresh || 300),
-              message: `「${folderName}」本次新增 ${get().settings.maxPerRefresh || 300} 条，已有的会跳过`,
-            },
-            syncingBrowser: true,
-          });
-          await api.refresh({ folderName, knownIds, startAllIndex, startListIndex });
-          return;
-        }
-        set({ job: { active: true, current: 0, total: 1, message: "正在同步收藏清单…" } });
-        await wait(900);
-        const { works, settings } = get();
-        if (works.some((w) => w.id === PENDING_REFRESH_WORK.id)) {
-          const wechat = Boolean(settings.pushplusToken || settings.wxpusherSpt);
-          set({
-            job: { active: false, current: 0, total: 0, message: "" },
-            captchaOpen: true,
-            captchaReason: "refresh",
-            toastWechat: wechat,
-          });
-          return;
-        }
         set({
-          works: [PENDING_REFRESH_WORK, ...works],
-          job: { active: false, current: 0, total: 0, message: "" },
+          readModeOpen: true,
+          readModeError: "",
+          readModeCount: String(Math.max(1, get().settings.maxPerRefresh || 20)),
         });
+      },
+      setReadModeCount: (value) => set({ readModeCount: value, readModeError: "" }),
+      cancelReadMode: () => set({ readModeOpen: false, readModeError: "" }),
+      confirmReadMode: (mode) => {
+        const folder = get().folders.find((f) => f.id === get().folderId);
+        const isDefault = !folder || folder.isDefault || folder.name === "收藏";
+        if (isDefault && mode === "all") {
+          set({ readModeError: "该收藏夹目前不支持全部读取功能" });
+          return;
+        }
+        if (!isDefault && mode === "limit") {
+          set({ readModeError: "该收藏夹目前不支持限定数量读取功能" });
+          return;
+        }
+        const count = Math.max(1, Number(get().readModeCount) || get().settings.maxPerRefresh || 20);
+        if (isDefault && count !== get().settings.maxPerRefresh) {
+          get().patchSettings({ maxPerRefresh: count });
+        }
+        set({ readModeOpen: false, readModeError: "" });
+        void runRefresh({ fullFolder: !isDefault, max: isDefault ? count : 50000 });
       },
 
       listFolders: async () => {
@@ -598,7 +590,7 @@ export const useApp = create<AppState>()(
         if (!api) return;
         await api.stopRefresh();
       },
-      applyRefreshResult: (folders, works) => {
+      applyRefreshResult: (folders, works, extra) => {
         const existing = liveDesktop() ? get().works.filter((w) => !isDemoWork(w)) : get().works;
         const seen = new Set(works.map((w) => w.id));
         const incomingIds = new Set((folders || []).map((f) => f.id));
@@ -623,7 +615,7 @@ export const useApp = create<AppState>()(
           if (!f.isDefault) chosen = [...new Set([...chosen, f.id, f.name])];
         }
         const folderId = nextFolders.some((f) => f.id === get().folderId) ? get().folderId : nextFolders[0].id;
-        const merged = mergeIncoming(existing, works);
+        const merged = rankFolderIfNeeded(mergeIncoming(existing, works), extra?.folder, nextFolders);
         const toMove = merged.flatMap((w) => {
           const last = existing.find((p) => p.id === w.id);
           if (!last) return [];
@@ -890,6 +882,74 @@ async function wait(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
+function rankFolderIfNeeded(works: Work[], folderName: string | undefined, folders: Folder[]) {
+  if (!folderName || folderName === "收藏") return works;
+  const fid = folders.find((f) => f.name === folderName)?.id;
+  if (!fid) return works;
+  const mine = works.filter((w) => inFolder(w, fid)).sort(compareCollectTime);
+  mine.forEach((w, i) => {
+    w.listIndex = i;
+  });
+  const rest = works.filter((w) => !inFolder(w, fid));
+  return [...rest, ...mine];
+}
+
+async function runRefresh(opts: { fullFolder: boolean; max: number }) {
+  const get = () => useApp.getState();
+  const api = desktop();
+  if (api) {
+    await api.setSettings(get().settings);
+    const folderName = get().folders.find((f) => f.id === get().folderId)?.name || "收藏";
+    const works = get().works;
+    const folderId = get().folderId;
+    const hidden = new Set(get().hiddenCollectIds || []);
+    const visible = works.filter((w) => !hidden.has(w.id));
+    const knownIds = opts.fullFolder
+      ? []
+      : folderName === "收藏"
+        ? visible.filter((w) => w.allIndex != null).map((w) => w.id)
+        : visible.filter((w) => inFolder(w, folderId)).map((w) => w.id);
+    const startAllIndex = visible.reduce((m, w) => Math.max(m, w.allIndex ?? -1), -1) + 1;
+    useApp.setState({
+      job: {
+        active: true,
+        current: 0,
+        total: opts.fullFolder ? 1 : opts.max,
+        message: opts.fullFolder
+          ? `「${folderName}」全部读取进清单，按收藏时间排序`
+          : `「${folderName}」本次新增 ${opts.max} 条，已有的会跳过`,
+      },
+      syncingBrowser: true,
+    });
+    await api.refresh({
+      folderName,
+      knownIds,
+      startAllIndex,
+      startListIndex: 0,
+      fullFolder: opts.fullFolder,
+      max: opts.max,
+    });
+    return;
+  }
+  useApp.setState({ job: { active: true, current: 0, total: 1, message: "正在同步收藏清单…" } });
+  await wait(900);
+  const { works, settings } = get();
+  if (works.some((w) => w.id === PENDING_REFRESH_WORK.id)) {
+    const wechat = Boolean(settings.pushplusToken || settings.wxpusherSpt);
+    useApp.setState({
+      job: { active: false, current: 0, total: 0, message: "" },
+      captchaOpen: true,
+      captchaReason: "refresh",
+      toastWechat: wechat,
+    });
+    return;
+  }
+  useApp.setState({
+    works: [PENDING_REFRESH_WORK, ...works],
+    job: { active: false, current: 0, total: 0, message: "" },
+  });
+}
+
 function mergeIncoming(existing: Work[], incoming: Work[]) {
   const byId = new Map(existing.map((w) => [w.id, w]));
   let nextAll = Math.max(-1, ...existing.map((w) => w.allIndex ?? -1)) + 1;
@@ -922,6 +982,8 @@ function mergeIncoming(existing: Work[], incoming: Work[]) {
       status: prev.status === "downloaded" || prev.status === "stale" ? prev.status : w.status,
       videoStatus: videoStatusOf(prev) === "saved" ? "saved" : w.videoStatus ?? videoStatusOf(prev),
       alsoInFolderIds: [...new Set([...(prev.alsoInFolderIds || []), ...(w.alsoInFolderIds || []), prev.folderId, w.folderId].filter((id) => id && id !== folderId))],
+      collectTimeKnown: Boolean(w.collectTimeKnown || prev.collectTimeKnown),
+      collectedAt: w.collectTimeKnown ? w.collectedAt : prev.collectTimeKnown ? prev.collectedAt : w.collectedAt,
       listIndex: prev.listIndex ?? (w.listIndex != null && folderId !== "default" ? takeList(folderId) : w.listIndex),
       allIndex: prev.allIndex ?? (w.allIndex != null ? nextAll++ : w.allIndex),
     });

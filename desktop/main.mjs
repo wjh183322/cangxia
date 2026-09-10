@@ -255,6 +255,33 @@ function clearCaptchaLock() {
   captchaLock = false;
 }
 
+async function waitWhilePaused() {
+  while (refreshPaused && !refreshStop) await sleep(400);
+}
+
+function requestBlocked(res) {
+  const msg = `${res?.status || ""} ${res?.json?.status_code ?? ""} ${res?.json?.status_msg || ""} ${res?.text || ""}`;
+  return /403|Argus|Sign Invalid|Blocked|verify|captcha|验证码/i.test(msg);
+}
+
+function rankCapturedByCollectTime(folderId) {
+  const mine = [...captured.values()].filter(
+    (w) => w.folderId === folderId || (w.alsoInFolderIds || []).includes(folderId),
+  );
+  mine.sort((a, b) => {
+    const ak = a.collectTimeKnown ? 0 : 1;
+    const bk = b.collectTimeKnown ? 0 : 1;
+    if (ak !== bk) return ak - bk;
+    if (!ak) return (b.collectedAt || 0) - (a.collectedAt || 0);
+    return (a.listIndex ?? 0) - (b.listIndex ?? 0);
+  });
+  mine.forEach((w, i) => {
+    w.listIndex = i;
+    captured.set(w.id, w);
+  });
+  harvestIdOrder = mine.map((w) => w.id);
+}
+
 async function attachNetwork(win) {
   const wc = win.webContents;
   try {
@@ -1392,27 +1419,43 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
   readingCollectsId = id;
   readingInside = true;
   let cursor = 0;
-  for (let page = 0; page < 80; page += 1) {
+  const folderTotal = Number(hit?.count) > 0 ? Number(hit.count) : 0;
+  for (let page = 0; page < 400; page += 1) {
+    await waitWhilePaused();
     if (refreshStop || !win || win.isDestroyed()) return countProgress(folderId, folderName, started);
     if (countProgress(folderId, folderName, started) >= max) return countProgress(folderId, folderName, started);
     send("cangxia:progress", {
       active: true,
-      current: Math.min(countProgress(folderId, folderName, started), max),
-      total: max,
-      message: `${tag} 读「${folderName}」#${id} ${countProgress(folderId, folderName, started)}/${max}`,
+      current: countProgress(folderId, folderName, started),
+      total: folderTotal || Math.max(countProgress(folderId, folderName, started), 1),
+      message: `${tag} 读「${folderName}」 ${countProgress(folderId, folderName, started)}/${folderTotal}`,
     });
     const url = `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`;
     const res = await doRequest(win, {
       method: "GET",
       path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
-      query: { collects_id: id, cursor: String(cursor), count: "10" },
+      query: { collects_id: id, cursor: String(cursor), count: "20" },
     });
+    if (requestBlocked(res)) {
+      noteHarvest(`${res.status} ${res.json?.status_msg || res.text || "blocked"}`);
+      emitCaptcha("refresh");
+      send("cangxia:progress", {
+        active: true,
+        current: countProgress(folderId, folderName, started),
+        total: folderTotal,
+        message: "遇到验证码，过完滑块后会自动接着读",
+      });
+      await waitWhilePaused();
+      if (refreshStop) return countProgress(folderId, folderName, started);
+      page -= 1;
+      continue;
+    }
     if (!jsonOk(res.json)) {
       noteHarvest(`${res.status} ${res.json?.status_code ?? ""} ${res.json?.status_msg || res.text || ""}`);
       send("cangxia:progress", {
         active: true,
         current: countProgress(folderId, folderName, started),
-        total: max,
+        total: folderTotal,
         message: `${tag} 夹接口失败 ${lastHarvestError}`.slice(0, 90),
       });
       break;
@@ -1422,8 +1465,9 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
     if (!next.hasMore) break;
     if (String(next.cursor) === String(cursor)) break;
     cursor = next.cursor;
-    await sleep(400);
+    await sleep(600);
   }
+  rankCapturedByCollectTime(folderId);
   return countProgress(folderId, folderName, started);
 }
 
@@ -1542,6 +1586,30 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   lastHarvestCount = 0;
   netTrace = [];
   const ctx = { folderId, folderName, max, started, label: "" };
+  if (folderName !== "收藏") {
+    send("cangxia:progress", {
+      active: true,
+      current: 0,
+      total: max,
+      message: `接口读「${folderName}」全部进清单`,
+    });
+    await waitPageReady(win, folderName);
+    const added = await harvestVia(win, { ...ctx, label: "接口" }, signedRequest);
+    lastHarvestCount = added;
+    lastHarvestMethod = added
+      ? `接口读到${added}条`
+      : lastHarvestError
+        ? `接口没过(${lastHarvestError})`
+        : "接口没过";
+    rankCapturedByCollectTime(folderId);
+    send("cangxia:progress", {
+      active: true,
+      current: added,
+      total: Math.max(added, 1),
+      message: lastHarvestMethod,
+    });
+    return;
+  }
   const steps = [
     ["拦页面", () => harvestMcp(win, ctx)],
     ["页面fetch", () => harvestVia(win, ctx, signedRequest)],
@@ -1976,12 +2044,13 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   seenThisRead.clear();
   awemePool.clear();
   harvestIdOrder = [];
-  knownSkip = new Set((opts.knownIds || []).map((id) => String(id)));
+  const folderName = String(opts.folderName || "收藏").trim() || "收藏";
+  const fullFolder = Boolean(opts.fullFolder) && folderName !== "收藏";
+  knownSkip = fullFolder ? new Set() : new Set((opts.knownIds || []).map((id) => String(id)));
   skippedIds = new Set();
   refreshStop = false;
   refreshPaused = false;
-  const max = Math.max(1, Number(settings.maxPerRefresh) || 300);
-  const folderName = String(opts.folderName || "收藏").trim() || "收藏";
+  const max = fullFolder ? 50000 : Math.max(1, Number(opts.max) || Number(settings.maxPerRefresh) || 20);
   const startUrl = folderName === "收藏" ? FAVORITE_ALL_URL : FAVORITE_FOLDER_LIST_URL;
   refreshReading = true;
   readingFolderName = folderName;
@@ -1993,8 +2062,8 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
   send("cangxia:progress", {
     active: true,
     current: 0,
-    total: max,
-    message: `已开始监听「${folderName}」，本次新增 ${max} 条`,
+    total: fullFolder ? 1 : max,
+    message: fullFolder ? `全部读取「${folderName}」进清单` : `已开始监听「${folderName}」，本次新增 ${max} 条`,
   });
   void (async () => {
     try {
@@ -2009,7 +2078,7 @@ ipcMain.handle("cangxia:refresh", async (_e, opts = {}) => {
       readingOrder =
         folderName === "收藏"
           ? Math.max(0, Number(opts.startAllIndex) || 0)
-          : Math.max(0, Number(opts.startListIndex) || 0);
+          : 0;
       readingOrderStart = readingOrder;
       harvestIdOrder = [];
       seenThisRead.clear();

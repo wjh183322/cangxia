@@ -3,6 +3,7 @@ import { CaptchaDialog } from "@/components/captcha-dialog";
 import { CollectView } from "@/components/collect-view";
 import { FolderDeleteDialog } from "@/components/folder-delete-dialog";
 import { FolderPickDialog } from "@/components/folder-pick-dialog";
+import { ReadModeDialog } from "@/components/read-mode-dialog";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DownloadCancelDialog } from "@/components/download-cancel-dialog";
 import { DownloadDrawer, DownloadMiniBar } from "@/components/download-drawer";
@@ -189,6 +190,7 @@ export function AppShell() {
       <DeleteConfirmDialog />
       <FolderDeleteDialog />
       <FolderPickDialog />
+      <ReadModeDialog />
       <DownloadCancelDialog />
       <DownloadDrawer />
     </div>

@@ -42,6 +42,7 @@ export interface Work {
   videoUrl?: string;
   videos: WorkVideo[];
   collectedAt: number;
+  collectTimeKnown?: boolean;
   listIndex?: number;
   allIndex?: number;
   images: WorkImage[];

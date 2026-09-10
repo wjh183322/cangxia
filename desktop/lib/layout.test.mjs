@@ -58,6 +58,21 @@ test("mapAweme album picks non-watermark url", () => {
   assert.deepEqual(work.hashtags, ["静物"]);
 });
 
+test("mapAweme keeps collects_time and marks unknown", () => {
+  const known = mapAweme(
+    { aweme_id: "1", desc: "a", collects_time: 1710000000, images: [{ url_list: ["https://x/a.jpg"] }] },
+    { id: "f", name: "玛丽罗斯" },
+  );
+  assert.equal(known.collectTimeKnown, true);
+  assert.equal(known.collectedAt, 1710000000000);
+  const unknown = mapAweme(
+    { aweme_id: "2", desc: "b", images: [{ url_list: ["https://x/b.jpg"] }] },
+    { id: "f", name: "玛丽罗斯" },
+  );
+  assert.equal(unknown.collectTimeKnown, false);
+  assert.equal(unknown.collectedAt, 0);
+});
+
 test("mapAweme album skips download_url_list watermark and uses url_list", () => {
   const work = mapAweme(
     {

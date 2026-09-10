@@ -202,6 +202,8 @@ export function mapAweme(aweme, folder) {
   let status = "new";
   if (!stillsOk && kind === "album") status = "no-origin";
   if ((kind === "video" || kind === "mixed") && !stillsOk && !videos.length) status = "no-origin";
+  const rawTime = Number(aweme._collect_time || aweme.collects_time || aweme.collect_time || 0);
+  const collectedAt = rawTime > 1e12 ? rawTime : rawTime > 1e9 ? rawTime * 1000 : 0;
   return {
     id,
     title: String(aweme.desc || aweme.preview_title || "未命名").split(/[#\n]/)[0].trim() || "未命名",
@@ -217,7 +219,8 @@ export function mapAweme(aweme, folder) {
     videoStatus,
     videoUrl: videos[0]?.url,
     videos,
-    collectedAt: (Number(aweme._collect_time || aweme.collects_time || aweme.collect_time) || 0) * 1000 || Date.now(),
+    collectedAt,
+    collectTimeKnown: collectedAt > 0,
     images,
     coverUrl: images[0]?.url || coverUrl(aweme.video) || "",
   };

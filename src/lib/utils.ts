@@ -24,6 +24,14 @@ export function matchesKind(work: Work, kind: KindFilter) {
   return work.kind === "video" || work.kind === "mixed";
 }
 
+export function compareCollectTime(a: Work, b: Work) {
+  const ak = a.collectTimeKnown ? 0 : 1;
+  const bk = b.collectTimeKnown ? 0 : 1;
+  if (ak !== bk) return ak - bk;
+  if (!ak) return (b.collectedAt || 0) - (a.collectedAt || 0);
+  return (a.listIndex ?? 1e12) - (b.listIndex ?? 1e12);
+}
+
 export function videoStatusOf(work: Work) {
   if (work.videoStatus) return work.videoStatus;
   if (workVideos(work).length) return "pending";

@@ -85,17 +85,17 @@ export function SettingsDialog() {
             />
           </label>
           <label className="block text-sm">
-            每次新增条数
+            总收藏每次读取条数
             <input
               className="mt-1 h-11 w-full rounded-md border border-line bg-raised px-3 text-sm"
               type="number"
               min={1}
               max={5000}
-              value={settings.maxPerRefresh ?? 300}
+              value={settings.maxPerRefresh ?? 20}
               onChange={(e) => patchSettings({ maxPerRefresh: Math.max(1, Number(e.target.value) || 1) })}
             />
             <span className="mt-1 block text-xs text-muted">
-              只读当前左侧这个夹。填 10 就是再收下 10 条没见过的；已经在清单里的会跳过，不用自己算「已有 N 再读 N+M」。
+              只对总收藏的「限定数量读取」有效。自建夹是全部读取，不受这个数字限制。
             </span>
           </label>
         </div>

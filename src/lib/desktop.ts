@@ -31,6 +31,8 @@ export interface DesktopApi {
     knownIds?: string[];
     startAllIndex?: number;
     startListIndex?: number;
+    fullFolder?: boolean;
+    max?: number;
   }) => Promise<{ ok: boolean; waiting?: boolean }>;
   listFolders: () => Promise<{ ok: boolean; waiting?: boolean }>;
   moveWorks: (payload: { works: { id: string; title: string; fromName: string; toName: string }[] }) => Promise<{ ok: boolean; error?: string }>;

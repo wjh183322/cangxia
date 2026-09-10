@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { isDesktop } from "@/lib/desktop";
 import { inFolder, useApp } from "@/lib/store";
 import type { Work } from "@/lib/types";
-import { folderTitle, kindChip, matchesKind, videoStatusOf, workVideos } from "@/lib/utils";
+import { folderTitle, kindChip, matchesKind, compareCollectTime, videoStatusOf, workVideos } from "@/lib/utils";
 
 function tagOptions(works: Work[], key: "hashtags" | "userTags") {
   const counts = new Map<string, number>();
@@ -64,14 +64,16 @@ export function LibraryView() {
   const userTagOptions = useMemo(() => tagOptions(downloaded, "userTags"), [downloaded]);
 
   const filtered = useMemo(() => {
-    const rank = (w: Work) =>
-      libraryFolderId === "default" || libraryFolderId === "all" ? (w.allIndex ?? 1e12) : (w.listIndex ?? 1e12);
+    const isDefault = libraryFolderId === "default" || libraryFolderId === "all";
     return downloaded
       .filter((w) => !filterAuthor || w.authorName.includes(filterAuthor))
       .filter((w) => !filterDouyin || w.douyinId.includes(filterDouyin))
       .filter((w) => !filterTag || w.hashtags.includes(filterTag))
       .filter((w) => !filterUserTag || w.userTags.includes(filterUserTag))
-      .sort((a, b) => rank(a) - rank(b) || b.collectedAt - a.collectedAt);
+      .sort((a, b) => {
+        if (isDefault) return (a.allIndex ?? 1e12) - (b.allIndex ?? 1e12) || b.collectedAt - a.collectedAt;
+        return compareCollectTime(a, b);
+      });
   }, [downloaded, filterAuthor, filterDouyin, filterTag, filterUserTag, libraryFolderId]);
 
   const work = downloaded.find((w) => w.id === libraryWorkId) ?? null;
@@ -385,8 +387,17 @@ export function LibraryView() {
                   <div className="relative aspect-portrait bg-raised">
                     <img src={w.coverUrl} alt="" className="size-full object-cover" />
                     {kindChip(w) && (
-                      <span className="absolute left-2 top-2 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] text-fg">
+                      <span
+                        className={`absolute left-2 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] text-fg ${
+                          w.collectTimeKnown === false ? "top-9" : "top-2"
+                        }`}
+                      >
                         {kindChip(w)}
+                      </span>
+                    )}
+                    {w.collectTimeKnown === false && (
+                      <span className="absolute left-2 top-2 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] text-warn">
+                        无收藏时间
                       </span>
                     )}
                     {tidyArmed && (

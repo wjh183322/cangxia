@@ -17,7 +17,7 @@ export function DesktopBridge() {
     });
     const offCount = api.onSyncCount((syncCount) => useApp.setState({ syncCount }));
     const offDone = api.onRefreshDone((data) => {
-      useApp.getState().applyRefreshResult(data.folders, data.works);
+      useApp.getState().applyRefreshResult(data.folders, data.works, { folder: data.folder });
       if (data.method) {
         useApp.setState({
           lastRead: {

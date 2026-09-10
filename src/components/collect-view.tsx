@@ -119,8 +119,17 @@ export function CollectView() {
                       <span className="absolute left-2 top-2 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] tabular-nums text-fg">
                         {index + 1}
                       </span>
+                      {!work.collectTimeKnown && (
+                        <span className="absolute left-2 top-9 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] text-warn">
+                          无收藏时间
+                        </span>
+                      )}
                       {kindChip(work) && (
-                        <span className="absolute left-2 top-9 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] text-fg">
+                        <span
+                          className={`absolute left-2 rounded-sm bg-bg/80 px-1.5 py-0.5 text-[11px] text-fg ${
+                            work.collectTimeKnown ? "top-9" : "top-16"
+                          }`}
+                        >
                           {kindChip(work)}
                         </span>
                       )}
