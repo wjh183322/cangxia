@@ -842,10 +842,50 @@ async function scrollGridTop(win) {
   }
 }
 
+async function cdpClick(wc, x, y) {
+  const down = { type: "mousePressed", x, y, button: "left", clickCount: 1 };
+  const up = { type: "mouseReleased", x, y, button: "left", clickCount: 1 };
+  try {
+    await wc.debugger.sendCommand("Input.dispatchMouseEvent", down);
+    await wc.debugger.sendCommand("Input.dispatchMouseEvent", up);
+  } catch {
+    wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+    wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+  }
+}
+
+async function cdpKey(wc, key, code, vk) {
+  const payload = {
+    type: "keyDown",
+    key,
+    code,
+    windowsVirtualKeyCode: vk,
+    nativeVirtualKeyCode: vk,
+  };
+  try {
+    await wc.debugger.sendCommand("Input.dispatchKeyEvent", payload);
+    await wc.debugger.sendCommand("Input.dispatchKeyEvent", { ...payload, type: "keyUp" });
+  } catch {
+    wc.sendInputEvent({ type: "keyDown", keyCode: vk });
+    wc.sendInputEvent({ type: "keyUp", keyCode: vk });
+  }
+}
+
 async function wheelBurst(win) {
   const wc = win.webContents;
-  let x = 640;
-  let y = 520;
+  try {
+    if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
+  } catch {
+    /* already */
+  }
+  win.focus();
+  try {
+    wc.focus();
+  } catch {
+    /* ignore */
+  }
+  let x = 520;
+  let y = 380;
   try {
     const pt = await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
     if (pt?.x && pt?.y) {
@@ -853,59 +893,18 @@ async function wheelBurst(win) {
       y = pt.y;
     }
   } catch {
-    try {
-      const pt = await wc.executeJavaScript(WORK_GRID_POINT_SCRIPT);
-      if (pt?.x && pt?.y) {
-        x = pt.x;
-        y = pt.y;
-      }
-    } catch {
-      /* keep */
-    }
+    /* keep */
   }
-  try {
-    if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
-  } catch {
-    /* already */
-  }
-  for (let i = 0; i < 6; i++) {
+  await cdpClick(wc, x, y);
+  await sleep(120);
+  await cdpClick(wc, x, y);
+  await sleep(160);
+  for (let i = 0; i < 10; i++) {
     if (refreshStop || !win || win.isDestroyed()) return;
-    try {
-      const pt = await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
-      if (pt?.x && pt?.y) {
-        x = pt.x;
-        y = pt.y;
-      }
-    } catch {
-      /* keep */
-    }
-    try {
-      await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
-        type: "mouseMoved",
-        x,
-        y,
-      });
-      await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
-        type: "mouseWheel",
-        x,
-        y,
-        deltaX: 0,
-        deltaY: 420,
-      });
-    } catch {
-      wc.sendInputEvent({ type: "mouseMove", x, y });
-      wc.sendInputEvent({
-        type: "mouseWheel",
-        x,
-        y,
-        deltaX: 0,
-        deltaY: -420,
-        canScroll: true,
-      });
-    }
-    await sleep(180);
+    await cdpKey(wc, "ArrowDown", "ArrowDown", 40);
+    await sleep(90);
   }
-  await sleep(400);
+  await sleep(280);
 }
 
 async function mcpClickFavorite(win) {

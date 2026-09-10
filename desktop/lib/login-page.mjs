@@ -566,15 +566,19 @@ export const SCROLL_FEED_SCRIPT = `(() => {
     const r = el.getBoundingClientRect();
     return r.width >= 100 && r.height >= 120 && r.left > 160 && r.bottom > 80 && r.top < innerHeight;
   });
-  cards.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-  const last = cards[cards.length - 1];
-  if (!last) return { x: Math.round(innerWidth * 0.58), y: Math.round(innerHeight * 0.72), cards: 0 };
-  const r = last.getBoundingClientRect();
-  return {
-    x: Math.round(r.left + r.width / 2),
-    y: Math.round(Math.min(innerHeight - 40, Math.max(180, r.top + r.height * 0.55))),
-    cards: cards.length,
-  };
+  cards.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left || a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  if (cards.length >= 2) {
+    const a = cards[0].getBoundingClientRect();
+    const b = cards[1].getBoundingClientRect();
+    if (b.left > a.right + 4) {
+      return { x: Math.round((a.right + b.left) / 2), y: Math.round(a.top + Math.min(48, a.height / 3)), cards: cards.length };
+    }
+  }
+  if (cards[0]) {
+    const r = cards[0].getBoundingClientRect();
+    return { x: Math.round(r.left + 8), y: Math.round(Math.max(8, r.top - 10)), cards: cards.length };
+  }
+  return { x: Math.round(innerWidth * 0.48), y: Math.round(innerHeight * 0.55), cards: 0 };
 })()`;
 
 export const LIST_SIDE_FOLDERS_SCRIPT = `(() => {
