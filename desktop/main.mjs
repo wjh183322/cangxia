@@ -7,7 +7,7 @@ import { collectAwemes, isCollectFeedUrl, isFolderListUrl, mapAweme, mapFolder, 
 import { notifyWechat } from "./lib/push.mjs";
 import { abortDownload, runWork } from "./lib/engine.mjs";
 import { looksLikeCaptcha } from "./lib/captcha.mjs";
-import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, FOLDER_LIST_READY_SCRIPT, LOCATE_FOLDER_TAB_SCRIPT, FAVORITE_ALL_URL, FAVORITE_FOLDER_LIST_URL, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, GRID_CARDS_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
+import { APP_SCHEMES, CHROME_UA, EXTRACT_QR_SCRIPT, LOGIN_PAGE_SCRIPT, OPEN_FAVORITE_SCRIPT, CLICK_FOLDER_TAB_SCRIPT, FOLDER_LIST_READY_SCRIPT, LOCATE_FOLDER_TAB_SCRIPT, FAVORITE_ALL_URL, FAVORITE_FOLDER_LIST_URL, clickFolderCardScript, clickFolderSideScript, clickOtherFolderScript, locateFolderCardScript, folderInsideScript, installFolderWatchScript, isHttpUrl, validFolderName, WORK_GRID_POINT_SCRIPT, GRID_CARDS_SCRIPT, PAGE_COLLECTS_ID_SCRIPT, LIST_VISIBLE_FOLDERS_SCRIPT, SCROLL_FEED_SCRIPT, SCROLL_GRID_TOP_SCRIPT, CLOSE_NEW_FOLDER_DIALOG_SCRIPT, mcpClickExactNameScript } from "./lib/login-page.mjs";
 import { commonQuery, parseCollectsList, parseDouyinJson, sameCollectsId, requestCursor, requestCollectsId, isZeroCursor, nextCursor, waitBdmsScript, signUrlScript, pageFetchScript, hookedXhrScript, NUDGE_MOUSE_SCRIPT, PAGE_TOKENS_SCRIPT, HOOK_PAGE_FEEDS_SCRIPT, DRAIN_PAGE_FEEDS_SCRIPT, LIST_COLLECT_URLS_SCRIPT } from "./lib/page-api.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -877,6 +877,11 @@ async function wheelBurst(win) {
     if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
   } catch {
     /* already */
+  }
+  try {
+    await wc.executeJavaScript(CLOSE_NEW_FOLDER_DIALOG_SCRIPT);
+  } catch {
+    /* ignore */
   }
   win.focus();
   try {

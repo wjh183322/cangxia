@@ -312,6 +312,7 @@ export function clickFolderSideScript(name) {
       if (r.width < 48 || r.width > 520 || r.height < 20 || r.height > 110) continue;
       const t = textOf(el);
       if (!t || t.length > 28) continue;
+      if (t.includes("新建收藏夹") || t.includes("批量管理")) continue;
       const rest = t.startsWith(nw) ? t.slice(nw.length) : "";
       if (t === nw || (rest && (/^\\d/.test(rest) || rest.startsWith("共")))) {
         hits.push({ el, t, len: t.length, x: Math.round(r.left + Math.min(36, r.width / 2)), y: Math.round(r.top + r.height / 2) });
@@ -357,6 +358,7 @@ export function clickFolderCardScript(name) {
       if (r.width < 140 || r.height < 80 || r.width > 900 || r.height > 900) return false;
       if (r.bottom < 80 || r.top > innerHeight - 8) return false;
       const t = textOf(el);
+      if (t.includes("新建收藏夹")) return false;
       if (t.length > 120) return false;
       return t.includes(nw) && /共\\d+作品/.test(t);
     });
@@ -370,6 +372,7 @@ export function clickFolderCardScript(name) {
       const r = el.getBoundingClientRect();
       if (r.width < 48 || r.height < 16 || r.height > 120) return false;
       const t = textOf(el);
+      if (t.includes("新建收藏夹")) return false;
       return t === nw || t.startsWith(nw);
     });
     rows.sort((a, b) => textOf(a).length - textOf(b).length);
@@ -564,24 +567,48 @@ export const SCROLL_GRID_TOP_SCRIPT = `(() => {
 export const SCROLL_FEED_SCRIPT = `(() => {
   const cards = [...document.querySelectorAll("a[href*='/video'], a[href*='/note'], a[href*='/aweme']")].filter((el) => {
     const r = el.getBoundingClientRect();
-    return r.width >= 100 && r.height >= 120 && r.left > 80 && r.bottom > 80 && r.top < innerHeight;
+    return r.width >= 100 && r.height >= 120 && r.left > 160 && r.bottom > 80 && r.top < innerHeight;
   });
   if (!cards.length) return { x: Math.round(innerWidth - 48), y: Math.round(innerHeight * 0.48), cards: 0 };
   let minL = Infinity;
   let maxR = 0;
   let minT = Infinity;
+  let maxB = 0;
   for (const el of cards) {
     const r = el.getBoundingClientRect();
     minL = Math.min(minL, r.left);
     maxR = Math.max(maxR, r.right);
     minT = Math.min(minT, r.top);
+    maxB = Math.max(maxB, r.bottom);
   }
   const y = Math.round(Math.min(innerHeight - 80, Math.max(170, minT + 36)));
-  const right = Math.round(maxR + 32);
-  const left = Math.round(minL - 32);
-  if (right < innerWidth - 12) return { x: right, y, cards: cards.length };
-  if (left > 90) return { x: left, y, cards: cards.length };
+  const right = Math.round(maxR + 28);
+  if (right < innerWidth - 8 && right > maxR + 4) return { x: right, y, cards: cards.length };
+  const xMid = Math.round((minL + maxR) / 2);
+  const yBelow = Math.round(Math.min(innerHeight - 36, maxB + 20));
+  if (yBelow > maxB && yBelow < innerHeight - 8) return { x: xMid, y: yBelow, cards: cards.length };
   return { x: Math.round(innerWidth - 40), y, cards: cards.length };
+})()`;
+
+export const CLOSE_NEW_FOLDER_DIALOG_SCRIPT = `(() => {
+  const nodes = [...document.querySelectorAll("div, section")];
+  const dlg = nodes.find((el) => {
+    const t = String(el.innerText || "");
+    const r = el.getBoundingClientRect();
+    return t.includes("新建收藏夹") && t.includes("请输入") && r.width > 220 && r.width < 720 && r.height > 120 && r.height < 640;
+  });
+  if (!dlg) return "none";
+  const close = [...dlg.querySelectorAll("button, span, div, svg")].find((el) => {
+    const t = String(el.innerText || el.getAttribute("aria-label") || "").trim();
+    return t === "×" || t === "x" || t === "X" || t.includes("关闭");
+  });
+  if (close) {
+    close.click();
+    return "x";
+  }
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+  document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+  return "esc";
 })()`;
 
 export const LIST_SIDE_FOLDERS_SCRIPT = `(() => {
