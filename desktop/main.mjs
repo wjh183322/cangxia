@@ -740,6 +740,10 @@ function countInFolder(folderId) {
   return n;
 }
 
+function countProgress() {
+  return seenThisRead.size;
+}
+
 function progressTotal() {
   if (Number(readingFolderTotal) > 0) return Number(readingFolderTotal);
   const n = Number(readingMax);
