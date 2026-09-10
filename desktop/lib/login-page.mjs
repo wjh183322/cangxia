@@ -564,21 +564,24 @@ export const SCROLL_GRID_TOP_SCRIPT = `(() => {
 export const SCROLL_FEED_SCRIPT = `(() => {
   const cards = [...document.querySelectorAll("a[href*='/video'], a[href*='/note'], a[href*='/aweme']")].filter((el) => {
     const r = el.getBoundingClientRect();
-    return r.width >= 100 && r.height >= 120 && r.left > 160 && r.bottom > 80 && r.top < innerHeight;
+    return r.width >= 100 && r.height >= 120 && r.left > 80 && r.bottom > 80 && r.top < innerHeight;
   });
-  cards.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left || a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-  if (cards.length >= 2) {
-    const a = cards[0].getBoundingClientRect();
-    const b = cards[1].getBoundingClientRect();
-    if (b.left > a.right + 4) {
-      return { x: Math.round((a.right + b.left) / 2), y: Math.round(a.top + Math.min(48, a.height / 3)), cards: cards.length };
-    }
+  if (!cards.length) return { x: Math.round(innerWidth - 48), y: Math.round(innerHeight * 0.48), cards: 0 };
+  let minL = Infinity;
+  let maxR = 0;
+  let minT = Infinity;
+  for (const el of cards) {
+    const r = el.getBoundingClientRect();
+    minL = Math.min(minL, r.left);
+    maxR = Math.max(maxR, r.right);
+    minT = Math.min(minT, r.top);
   }
-  if (cards[0]) {
-    const r = cards[0].getBoundingClientRect();
-    return { x: Math.round(r.left + 8), y: Math.round(Math.max(8, r.top - 10)), cards: cards.length };
-  }
-  return { x: Math.round(innerWidth * 0.48), y: Math.round(innerHeight * 0.55), cards: 0 };
+  const y = Math.round(Math.min(innerHeight - 80, Math.max(170, minT + 36)));
+  const right = Math.round(maxR + 32);
+  const left = Math.round(minL - 32);
+  if (right < innerWidth - 12) return { x: right, y, cards: cards.length };
+  if (left > 90) return { x: left, y, cards: cards.length };
+  return { x: Math.round(innerWidth - 40), y, cards: cards.length };
 })()`;
 
 export const LIST_SIDE_FOLDERS_SCRIPT = `(() => {
