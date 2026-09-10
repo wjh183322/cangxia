@@ -50,6 +50,7 @@ let seenZeroCursor = false;
 let lastHarvestMethod = "";
 let lastHarvestCount = 0;
 let lastHarvestError = "";
+let readingFolderTotal = 0;
 let netTrace = [];
 let knownSkip = new Set();
 let skippedIds = new Set();
@@ -469,7 +470,7 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
       traceNet(url, `id-mismatch:${feedId}`);
       return;
     }
-    if (cur && Number(cur) > 0 && seenThisRead.size === 0) {
+    if (cur && Number(cur) > 0 && seenThisRead.size === 0 && !readingInside) {
       traceNet(url, `late-cursor:${cur}`);
       return;
     }
@@ -1420,55 +1421,76 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
   readingInside = true;
   let cursor = 0;
   const folderTotal = Number(hit?.count) > 0 ? Number(hit.count) : 0;
-  for (let page = 0; page < 400; page += 1) {
+  readingFolderTotal = folderTotal;
+  const pageSize = 10;
+  let emptyStreak = 0;
+  let failStreak = 0;
+  for (let page = 0; page < 2500; page += 1) {
     await waitWhilePaused();
-    if (refreshStop || !win || win.isDestroyed()) return countProgress(folderId, folderName, started);
-    if (countProgress(folderId, folderName, started) >= max) return countProgress(folderId, folderName, started);
+    if (refreshStop || !win || win.isDestroyed()) return countProgress();
+    const got = countProgress();
+    if (got >= max) return got;
+    if (folderTotal && got >= folderTotal) break;
     send("cangxia:progress", {
       active: true,
-      current: countProgress(folderId, folderName, started),
-      total: folderTotal || Math.max(countProgress(folderId, folderName, started), 1),
-      message: `${tag} 读「${folderName}」 ${countProgress(folderId, folderName, started)}/${folderTotal}`,
+      current: got,
+      total: folderTotal || Math.max(got, 1),
+      message: `${tag} 读「${folderName}」 ${got}/${folderTotal || "…"}`,
     });
     const url = `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`;
     const res = await doRequest(win, {
       method: "GET",
       path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
-      query: { collects_id: id, cursor: String(cursor), count: "20" },
+      query: { collects_id: id, cursor: String(cursor), count: String(pageSize) },
     });
     if (requestBlocked(res)) {
+      failStreak += 1;
       noteHarvest(`${res.status} ${res.json?.status_msg || res.text || "blocked"}`);
       emitCaptcha("refresh");
       send("cangxia:progress", {
         active: true,
-        current: countProgress(folderId, folderName, started),
-        total: folderTotal,
+        current: countProgress(),
+        total: folderTotal || 1,
         message: "遇到验证码，过完滑块后会自动接着读",
       });
       await waitWhilePaused();
-      if (refreshStop) return countProgress(folderId, folderName, started);
+      if (refreshStop) return countProgress();
+      await sleep(Math.min(5000, 900 * failStreak));
       page -= 1;
       continue;
     }
     if (!jsonOk(res.json)) {
+      failStreak += 1;
       noteHarvest(`${res.status} ${res.json?.status_code ?? ""} ${res.json?.status_msg || res.text || ""}`);
       send("cangxia:progress", {
         active: true,
-        current: countProgress(folderId, folderName, started),
-        total: folderTotal,
-        message: `${tag} 夹接口失败 ${lastHarvestError}`.slice(0, 90),
+        current: countProgress(),
+        total: folderTotal || 1,
+        message: `${tag} 这一页失败，重试 ${failStreak}`.slice(0, 90),
       });
-      break;
+      if (failStreak >= 8) break;
+      await sleep(Math.min(5000, 700 * failStreak));
+      page -= 1;
+      continue;
     }
+    failStreak = 0;
+    const batch = collectAwemes(res.json);
     ingestPayload(url, res.json);
+    if (!batch.length) {
+      emptyStreak += 1;
+      if (emptyStreak >= 3 && (!folderTotal || countProgress() >= folderTotal || emptyStreak >= 6)) break;
+      cursor = Number(cursor) + pageSize;
+      await sleep(800);
+      continue;
+    }
+    emptyStreak = 0;
     const next = nextCursor(res.json, cursor);
-    if (!next.hasMore) break;
-    if (String(next.cursor) === String(cursor)) break;
-    cursor = next.cursor;
-    await sleep(600);
+    if (next.cursor != null && String(next.cursor) !== String(cursor)) cursor = next.cursor;
+    else cursor = Number(cursor) + Math.max(batch.length, pageSize);
+    await sleep(700);
   }
   rankCapturedByCollectTime(folderId);
-  return countProgress(folderId, folderName, started);
+  return countProgress();
 }
 
 async function harvestByIntercept(win, { folderId, folderName, max, started }) {
@@ -1585,6 +1607,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
   lastHarvestMethod = "";
   lastHarvestCount = 0;
   netTrace = [];
+  readingFolderTotal = 0;
   const ctx = { folderId, folderName, max, started, label: "" };
   if (folderName !== "收藏") {
     send("cangxia:progress", {
@@ -1596,8 +1619,13 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     await waitPageReady(win, folderName);
     const added = await harvestVia(win, { ...ctx, label: "接口" }, signedRequest);
     lastHarvestCount = added;
+    const total = readingFolderTotal || 0;
     lastHarvestMethod = added
-      ? `接口读到${added}条`
+      ? total && added < total
+        ? `接口读到${added}/${total}条，未读完`
+        : total
+          ? `接口读完${added}条`
+          : `接口读到${added}条`
       : lastHarvestError
         ? `接口没过(${lastHarvestError})`
         : "接口没过";
