@@ -1477,6 +1477,24 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
     ingestPayload(url, res.json);
     if (!batch.length) {
       emptyStreak += 1;
+      const alt = await doRequest(win, {
+        method: "GET",
+        path: "https://www.douyin.com/aweme/v1/web/collects/video/list/",
+        query: { collects_id: id, cursor: String(cursor), max_cursor: String(cursor), count: "20" },
+      });
+      if (jsonOk(alt.json) && collectAwemes(alt.json).length) {
+        ingestPayload(url, alt.json);
+        emptyStreak = 0;
+        const nxt = nextCursor(alt.json, cursor);
+        cursor = nxt.cursor != null && String(nxt.cursor) !== String(cursor) ? nxt.cursor : Number(cursor) + 20;
+        await sleep(700);
+        continue;
+      }
+      if (folderTotal && countProgress() < folderTotal && emptyStreak < 12) {
+        cursor = Number(cursor) + pageSize;
+        await sleep(600);
+        continue;
+      }
       if (emptyStreak >= 3 && (!folderTotal || countProgress() >= folderTotal || emptyStreak >= 6)) break;
       cursor = Number(cursor) + pageSize;
       await sleep(800);
@@ -1495,30 +1513,32 @@ async function harvestVia(win, { folderId, folderName, max, started, label }, do
 async function harvestByIntercept(win, { folderId, folderName, max, started }) {
   refreshReading = true;
   readingInside = true;
-  const deadline = Date.now() + Math.min(180000, 60000 + knownSkip.size * 150);
+  const target = readingFolderTotal || max;
+  const remain = Math.max(0, target - countProgress());
+  const deadline = Date.now() + Math.min(20 * 60 * 1000, 120000 + remain * 500);
   send("cangxia:progress", {
     active: true,
-    current: 0,
-    total: max,
-    message: `正在读取「${folderName}」新增 0/${max}`,
+    current: countProgress(),
+    total: target,
+    message: `在夹里续读「${folderName}」 ${countProgress()}/${target}`,
   });
   await drainPageFeeds(win);
-  let got = countProgress(folderId, folderName, started);
+  let got = countProgress();
   if (got < max) await waitForNewItems(got, 8000, folderName, folderId, started, max);
-  got = countProgress(folderId, folderName, started);
-  if (got >= max) return got;
+  got = countProgress();
+  if (got >= max || (readingFolderTotal && got >= readingFolderTotal)) return got;
   let idle = 0;
   while (win && !win.isDestroyed() && !refreshStop) {
     while (refreshPaused && !refreshStop) await sleep(400);
     if (refreshStop || !win || win.isDestroyed() || Date.now() > deadline) break;
-    got = countProgress(folderId, folderName, started);
+    got = countProgress();
     send("cangxia:progress", {
       active: true,
-      current: Math.min(got, max),
-      total: max,
-      message: `正在读取「${folderName}」 ${got}/${max}${skippedIds.size ? `，清单已有 ${skippedIds.size} 条先跳过` : ""}`,
+      current: got,
+      total: target,
+      message: `在夹里续读「${folderName}」 ${got}/${target}`,
     });
-    if (got >= max) break;
+    if (got >= max || (readingFolderTotal && got >= readingFolderTotal)) break;
     const before = got;
     const skipBefore = skippedIds.size;
     await drainPageFeeds(win);
@@ -1526,14 +1546,15 @@ async function harvestByIntercept(win, { folderId, folderName, max, started }) {
     await drainPageFeeds(win);
     const grew = await waitForNewItems(before, 3500, folderName, folderId, started, max);
     await drainPageFeeds(win);
-    got = countProgress(folderId, folderName, started);
-    if (got >= max) break;
+    got = countProgress();
+    if (got >= max || (readingFolderTotal && got >= readingFolderTotal)) break;
     if (grew || skippedIds.size > skipBefore) idle = 0;
     else idle += 1;
-    if (!readingHasMore && idle >= 6) break;
-    if (idle >= 20) break;
+    const needMore = readingFolderTotal && got < readingFolderTotal;
+    if (!needMore && !readingHasMore && idle >= 6) break;
+    if (idle >= (needMore ? 40 : 20)) break;
   }
-  return countProgress(folderId, folderName, started);
+  return countProgress();
 }
 
 async function openNamedFolder(win, folderName, { skipNav = false } = {}) {
@@ -1616,15 +1637,26 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
       message: `接口读「${folderName}」全部进清单`,
     });
     await waitPageReady(win, folderName);
-    const added = await harvestVia(win, { ...ctx, label: "接口" }, signedRequest);
-    lastHarvestCount = added;
+    let added = await harvestVia(win, { ...ctx, label: "接口" }, signedRequest);
     const total = readingFolderTotal || 0;
+    if (added > 0 && total && added < total && !refreshStop && win && !win.isDestroyed()) {
+      send("cangxia:progress", {
+        active: true,
+        current: added,
+        total,
+        message: `接口 ${added}/${total}，点进夹继续滚`,
+      });
+      await openNamedFolder(win, folderName);
+      readingInside = true;
+      added = await harvestByIntercept(win, { folderId, folderName, max, started });
+    }
+    lastHarvestCount = added;
     lastHarvestMethod = added
       ? total && added < total
-        ? `接口读到${added}/${total}条，未读完`
+        ? `读到${added}/${total}条，未读完`
         : total
-          ? `接口读完${added}条`
-          : `接口读到${added}条`
+          ? `读完${added}条`
+          : `读到${added}条`
       : lastHarvestError
         ? `接口没过(${lastHarvestError})`
         : "接口没过";
@@ -1632,7 +1664,7 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
     send("cangxia:progress", {
       active: true,
       current: added,
-      total: Math.max(added, 1),
+      total: Math.max(total || added, 1),
       message: lastHarvestMethod,
     });
     return;
