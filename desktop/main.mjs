@@ -1540,11 +1540,11 @@ async function continueFolderInPage(win, { folderId, folderName, max, started })
   const folder = ensureFolder(folderName, id);
   let cursor = readingCursor || countProgress();
   let empty = 0;
-  for (let page = 0; page < 2000; page += 1) {
+  for (let page = 0; page < 3; page += 1) {
     await waitWhilePaused();
     if (refreshStop || !win || win.isDestroyed()) break;
-    const got = countProgress();
-    if (got >= max || (readingFolderTotal && got >= readingFolderTotal)) break;
+    const before = countProgress();
+    if (before >= max || (readingFolderTotal && before >= readingFolderTotal)) break;
     sendReadProgress(folderName, "，页面接口续翻");
     const query = { collects_id: id, cursor: String(cursor), count: "10" };
     let res = await hookedRequest(win, {
@@ -1559,25 +1559,23 @@ async function continueFolderInPage(win, { folderId, folderName, max, started })
         query,
       });
     }
-    const batch = collectAwemes(res.json);
-    if (jsonOk(res.json) && batch.length) {
-      ingestPayload(
-        `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`,
-        res.json,
-      );
-      empty = 0;
-      const next = nextCursor(res.json, cursor);
-      cursor = next.cursor != null && String(next.cursor) !== String(cursor) ? next.cursor : Number(cursor) + Math.max(batch.length, 10);
-      readingCursor = cursor;
-    } else {
+    ingestPayload(
+      `https://www.douyin.com/aweme/v1/web/collects/video/list/?collects_id=${id}&cursor=${cursor}`,
+      res.json,
+    );
+    const grew = countProgress() > before;
+    const next = nextCursor(res.json, cursor);
+    if (next.cursor != null && String(next.cursor) !== String(cursor)) cursor = next.cursor;
+    else cursor = Number(cursor) + 10;
+    readingCursor = cursor;
+    if (!grew) {
       empty += 1;
-      cursor = Number(cursor) + 10;
-      readingCursor = cursor;
-      if (empty >= 5) break;
-    }
-    await sleep(500);
+      if (empty >= 2) break;
+    } else empty = 0;
+    await sleep(300);
   }
   if (readingFolderTotal && countProgress() >= readingFolderTotal) return countProgress();
+  sendReadProgress(folderName, "，夹里滚动");
   return harvestByIntercept(win, { folderId, folderName, max, started, folder });
 }
 
