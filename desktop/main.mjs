@@ -705,13 +705,7 @@ async function waitListPageFirst(win, folderName, timeoutMs = 7000) {
 }
 
 async function snapshotWorks() {
-  const works = [...captured.values()].map((w) => {
-    if (seenThisRead.size && !seenThisRead.has(w.id)) {
-      if (readingFolderName === "收藏") return { ...w, allIndex: (w.allIndex ?? 0) + 1_000_000 };
-      return { ...w, listIndex: (w.listIndex ?? 0) + 1_000_000 };
-    }
-    return w;
-  }).sort((a, b) => {
+  const works = [...captured.values()].sort((a, b) => {
     if (readingFolderName === "收藏") return (a.allIndex ?? 1e12) - (b.allIndex ?? 1e12);
     return (a.listIndex ?? 1e12) - (b.listIndex ?? 1e12);
   });

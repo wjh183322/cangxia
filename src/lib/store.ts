@@ -677,7 +677,11 @@ export const useApp = create<AppState>()(
         const tagged = (incoming || []).map((w) => ({ ...w, folderId: fid, alsoInFolderIds: [] as string[] }));
         const mine = existing.filter((w) => w.folderId === fid);
         const rest = existing.filter((w) => w.folderId !== fid);
-        const mergedMine = rankFolderIfNeeded(mergeIncoming(mine, tagged), folderName, nextFolders).map((w) => ({
+        const mergedMine = (
+          folderName === "收藏"
+            ? mergeCollectIncremental(mine, tagged)
+            : rankFolderIfNeeded(mergeIncoming(mine, tagged), folderName, nextFolders)
+        ).map((w) => ({
           ...w,
           folderId: fid,
           alsoInFolderIds: [],
@@ -1012,6 +1016,24 @@ async function runRefresh(opts: { fullFolder: boolean; max: number }) {
   });
 }
 
+function patchWork(prev: Work, w: Work): Work {
+  const folderId = prev.folderId && prev.folderId !== "default" ? prev.folderId : w.folderId;
+  return {
+    ...w,
+    folderId,
+    userTags: prev.userTags,
+    status: prev.status === "downloaded" || prev.status === "stale" ? prev.status : w.status,
+    videoStatus: videoStatusOf(prev) === "saved" ? "saved" : w.videoStatus ?? videoStatusOf(prev),
+    alsoInFolderIds: [
+      ...new Set([...(prev.alsoInFolderIds || []), ...(w.alsoInFolderIds || []), prev.folderId, w.folderId].filter((id) => id && id !== folderId)),
+    ],
+    collectTimeKnown: Boolean(w.collectTimeKnown || prev.collectTimeKnown),
+    collectedAt: w.collectTimeKnown ? w.collectedAt : prev.collectTimeKnown ? prev.collectedAt : w.collectedAt,
+    listIndex: w.listIndex != null && folderId !== "default" ? w.listIndex : prev.listIndex ?? w.listIndex,
+    allIndex: w.allIndex != null ? w.allIndex : prev.allIndex,
+  };
+}
+
 function mergeIncoming(existing: Work[], incoming: Work[]) {
   const byId = new Map(existing.map((w) => [w.id, w]));
   for (const w of incoming) {
@@ -1020,19 +1042,7 @@ function mergeIncoming(existing: Work[], incoming: Work[]) {
       byId.set(w.id, { ...w });
       continue;
     }
-    const folderId = prev.folderId && prev.folderId !== "default" ? prev.folderId : w.folderId;
-    byId.set(w.id, {
-      ...w,
-      folderId,
-      userTags: prev.userTags,
-      status: prev.status === "downloaded" || prev.status === "stale" ? prev.status : w.status,
-      videoStatus: videoStatusOf(prev) === "saved" ? "saved" : w.videoStatus ?? videoStatusOf(prev),
-      alsoInFolderIds: [...new Set([...(prev.alsoInFolderIds || []), ...(w.alsoInFolderIds || []), prev.folderId, w.folderId].filter((id) => id && id !== folderId))],
-      collectTimeKnown: Boolean(w.collectTimeKnown || prev.collectTimeKnown),
-      collectedAt: w.collectTimeKnown ? w.collectedAt : prev.collectTimeKnown ? prev.collectedAt : w.collectedAt,
-      listIndex: w.listIndex != null && folderId !== "default" ? w.listIndex : prev.listIndex ?? w.listIndex,
-      allIndex: w.allIndex != null ? w.allIndex : prev.allIndex,
-    });
+    byId.set(w.id, patchWork(prev, w));
   }
   const ordered = incoming
     .filter((w) => w.allIndex != null)
@@ -1050,4 +1060,37 @@ function mergeIncoming(existing: Work[], incoming: Work[]) {
     ...collectRest.map((w, i) => ({ ...w, allIndex: head.length + i })),
     ...other,
   ];
+}
+
+function mergeCollectIncremental(existing: Work[], incoming: Work[]) {
+  const merged = new Map(existing.map((w) => [w.id, w]));
+  for (const w of incoming) {
+    const prev = merged.get(w.id);
+    merged.set(w.id, prev ? patchWork(prev, w) : { ...w });
+  }
+  const harvest = incoming
+    .filter((w) => w.id)
+    .sort((a, b) => (a.allIndex ?? 1e12) - (b.allIndex ?? 1e12));
+  if (!existing.length) {
+    return harvest.map((w, i) => ({ ...(merged.get(w.id) as Work), allIndex: i }));
+  }
+  if (!harvest.length) return existing.map((w, i) => ({ ...w, allIndex: i }));
+  const list = existing.map((w) => merged.get(w.id) as Work);
+  const inList = new Set(list.map((w) => w.id));
+  for (const w of harvest) {
+    const row = merged.get(w.id);
+    if (!row || inList.has(w.id)) continue;
+    let afterId: string | null = null;
+    for (const p of harvest) {
+      if ((p.allIndex ?? 0) >= (w.allIndex ?? 0)) break;
+      if (inList.has(p.id)) afterId = p.id;
+    }
+    if (afterId == null) list.unshift(row);
+    else {
+      const i = list.findIndex((x) => x.id === afterId);
+      list.splice(i < 0 ? list.length : i + 1, 0, row);
+    }
+    inList.add(w.id);
+  }
+  return list.map((w, i) => ({ ...w, allIndex: i }));
 }
