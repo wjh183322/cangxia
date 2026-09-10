@@ -212,6 +212,7 @@ export function pageFetchScript({ method = "GET", url, body = null }) {
   return `(() => fetch(${JSON.stringify(url)}, {
     method: ${JSON.stringify(method)},
     credentials: "include",
+    cache: "no-store",
     headers: {
       Accept: "application/json, text/plain, */*"${method === "POST" ? ',\n      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"' : ""}
     }${body == null ? "" : `,\n    body: ${JSON.stringify(String(body))}`}

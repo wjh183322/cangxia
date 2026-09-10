@@ -958,14 +958,10 @@ async function runRefresh(opts: { fullFolder: boolean; max: number }) {
 
 function mergeIncoming(existing: Work[], incoming: Work[]) {
   const byId = new Map(existing.map((w) => [w.id, w]));
-  let nextAll = Math.max(-1, ...existing.map((w) => w.allIndex ?? -1)) + 1;
   for (const w of incoming) {
     const prev = byId.get(w.id);
     if (!prev) {
-      const next = { ...w };
-      if (w.allIndex != null) next.allIndex = nextAll++;
-      if (w.listIndex != null && w.folderId && w.folderId !== "default") next.listIndex = w.listIndex;
-      byId.set(w.id, next);
+      byId.set(w.id, { ...w });
       continue;
     }
     const folderId = prev.folderId && prev.folderId !== "default" ? prev.folderId : w.folderId;
@@ -979,8 +975,23 @@ function mergeIncoming(existing: Work[], incoming: Work[]) {
       collectTimeKnown: Boolean(w.collectTimeKnown || prev.collectTimeKnown),
       collectedAt: w.collectTimeKnown ? w.collectedAt : prev.collectTimeKnown ? prev.collectedAt : w.collectedAt,
       listIndex: w.listIndex != null && folderId !== "default" ? w.listIndex : prev.listIndex ?? w.listIndex,
-      allIndex: prev.allIndex ?? (w.allIndex != null ? nextAll++ : w.allIndex),
+      allIndex: w.allIndex != null ? w.allIndex : prev.allIndex,
     });
   }
-  return [...byId.values()];
+  const ordered = incoming
+    .filter((w) => w.allIndex != null)
+    .sort((a, b) => (a.allIndex ?? 0) - (b.allIndex ?? 0));
+  if (!ordered.length) return [...byId.values()];
+  const seen = new Set(ordered.map((w) => w.id));
+  const head = ordered.map((w) => byId.get(w.id)).filter(Boolean) as Work[];
+  const rest = [...byId.values()].filter((w) => !seen.has(w.id));
+  const collectRest = rest
+    .filter((w) => w.allIndex != null)
+    .sort((a, b) => (a.allIndex ?? 0) - (b.allIndex ?? 0));
+  const other = rest.filter((w) => w.allIndex == null);
+  return [
+    ...head.map((w, i) => ({ ...w, allIndex: i })),
+    ...collectRest.map((w, i) => ({ ...w, allIndex: head.length + i })),
+    ...other,
+  ];
 }

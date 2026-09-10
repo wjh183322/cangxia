@@ -491,12 +491,9 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
   for (const aweme of awemes) {
     const inner = unwrapAweme(aweme) || aweme;
     const id = String(inner.aweme_id || inner.id || aweme.aweme_id || "");
-    if (id && knownSkip.has(id)) {
-      skippedIds.add(id);
-      continue;
-    }
-    const isNew = id && !captured.has(id);
-    if (isNew && seenThisRead.size >= cap) {
+    if (id && knownSkip.has(id)) skippedIds.add(id);
+    const countIt = Boolean(id) && !knownSkip.has(id);
+    if (countIt && seenThisRead.size >= cap) {
       refreshReading = false;
       break;
     }
@@ -509,7 +506,7 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
     const prev = captured.get(work.id);
     if (id && !harvestIdOrder.includes(id)) harvestIdOrder.push(id);
     const pos = id ? harvestIdOrder.indexOf(id) : harvestIdOrder.length;
-    if (reading === "收藏") work.allIndex = readingOrderStart + Math.max(0, pos);
+    if (reading === "收藏") work.allIndex = Math.max(0, pos);
     else work.listIndex = readingOrderStart + Math.max(0, pos);
     if (prev) {
       if (work.allIndex == null && prev.allIndex != null) work.allIndex = prev.allIndex;
@@ -523,7 +520,7 @@ function ingestPayload(url, json, cursorHint, postHint = "") {
       }
     }
     captured.set(work.id, work);
-    seenThisRead.add(work.id);
+    if (countIt) seenThisRead.add(work.id);
   }
   send("cangxia:sync-count", { works: captured.size, folders: folders.length });
 }
@@ -540,11 +537,9 @@ function ingestPooledOrCard(card, folder) {
   const id = String(card?.id || "");
   if (!id) return;
   const cap = Math.max(1, Number(readingMax) || 300);
-  if (knownSkip.has(id)) {
-    skippedIds.add(id);
-    return;
-  }
-  if (seenThisRead.size >= cap) return;
+  const countIt = !knownSkip.has(id);
+  if (knownSkip.has(id)) skippedIds.add(id);
+  if (countIt && seenThisRead.size >= cap) return;
   const folderRef = folder || ensureFolder(readingFolderName, readingCollectsId);
   const pooled = awemePool.get(id);
   const work = mapAweme(
@@ -563,10 +558,10 @@ function ingestPooledOrCard(card, folder) {
   }
   if (!harvestIdOrder.includes(work.id)) harvestIdOrder.push(work.id);
   const pos = harvestIdOrder.indexOf(work.id);
-  if (readingFolderName === "收藏") work.allIndex = readingOrderStart + Math.max(0, pos);
+  if (readingFolderName === "收藏") work.allIndex = Math.max(0, pos);
   else work.listIndex = readingOrderStart + Math.max(0, pos);
   captured.set(work.id, work);
-  seenThisRead.add(work.id);
+  if (countIt) seenThisRead.add(work.id);
 }
 
 async function harvestFromGrid(win, ctx) {
