@@ -1783,17 +1783,28 @@ async function scrollUntilCap(win, { folderId, folderName, max, started }) {
       const before = new Set(captured.keys());
       await run();
       const added = addedSince(before);
+      const got = countProgress(folderId, folderName, started);
       if (added > 0) {
         tried.push(`${label} 读到${added}条`);
         lastHarvestMethod = tried.join(" → ");
-        lastHarvestCount = added;
+        lastHarvestCount = got;
         send("cangxia:progress", {
           active: true,
-          current: Math.min(added, max),
+          current: Math.min(got, max),
           total: max,
           message: lastHarvestMethod,
         });
-        return;
+        if (got >= max || refreshStop) return;
+        const next = steps[i + 1];
+        if (!next) return;
+        send("cangxia:progress", {
+          active: true,
+          current: Math.min(got, max),
+          total: max,
+          message: `${lastHarvestMethod} → 不够 ${max}，接着${next[0]}`,
+        });
+        await sleep(600);
+        continue;
       }
       tried.push(lastHarvestError ? `${label} 没过(${lastHarvestError})` : `${label} 没过`);
       lastHarvestMethod = tried.join(" → ");
