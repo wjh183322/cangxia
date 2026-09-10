@@ -844,26 +844,15 @@ async function scrollGridTop(win) {
 
 async function wheelBurst(win) {
   const wc = win.webContents;
+  let x = 640;
+  let y = 520;
   try {
-    await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
-  } catch {
-    /* ignore */
-  }
-  let x = Math.round(640);
-  let y = Math.round(520);
-  try {
-    const pt = await wc.executeJavaScript(WORK_GRID_POINT_SCRIPT);
+    const pt = await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
     if (pt?.x && pt?.y) {
       x = pt.x;
       y = pt.y;
     }
   } catch {
-    /* keep */
-  }
-  wc.sendInputEvent({ type: "mouseMove", x, y });
-  await sleep(80);
-  for (let i = 0; i < 4; i++) {
-    if (refreshStop || !win || win.isDestroyed()) return;
     try {
       const pt = await wc.executeJavaScript(WORK_GRID_POINT_SCRIPT);
       if (pt?.x && pt?.y) {
@@ -873,18 +862,50 @@ async function wheelBurst(win) {
     } catch {
       /* keep */
     }
-    wc.sendInputEvent({ type: "mouseMove", x, y });
-    wc.sendInputEvent({
-      type: "mouseWheel",
-      x,
-      y,
-      deltaX: 0,
-      deltaY: 360,
-      canScroll: true,
-    });
-    await sleep(240);
   }
-  await sleep(500);
+  try {
+    if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
+  } catch {
+    /* already */
+  }
+  for (let i = 0; i < 6; i++) {
+    if (refreshStop || !win || win.isDestroyed()) return;
+    try {
+      const pt = await wc.executeJavaScript(SCROLL_FEED_SCRIPT);
+      if (pt?.x && pt?.y) {
+        x = pt.x;
+        y = pt.y;
+      }
+    } catch {
+      /* keep */
+    }
+    try {
+      await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x,
+        y,
+      });
+      await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
+        type: "mouseWheel",
+        x,
+        y,
+        deltaX: 0,
+        deltaY: 420,
+      });
+    } catch {
+      wc.sendInputEvent({ type: "mouseMove", x, y });
+      wc.sendInputEvent({
+        type: "mouseWheel",
+        x,
+        y,
+        deltaX: 0,
+        deltaY: -420,
+        canScroll: true,
+      });
+    }
+    await sleep(180);
+  }
+  await sleep(400);
 }
 
 async function mcpClickFavorite(win) {

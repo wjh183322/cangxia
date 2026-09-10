@@ -568,19 +568,13 @@ export const SCROLL_FEED_SCRIPT = `(() => {
   });
   cards.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
   const last = cards[cards.length - 1];
-  if (!last) return { cards: 0, how: "none" };
-  last.scrollIntoView({ block: "start", inline: "nearest", behavior: "instant" });
+  if (!last) return { x: Math.round(innerWidth * 0.58), y: Math.round(innerHeight * 0.72), cards: 0 };
   const r = last.getBoundingClientRect();
-  last.dispatchEvent(new WheelEvent("wheel", {
-    bubbles: true,
-    cancelable: true,
-    deltaY: 640,
-    deltaMode: 0,
-    clientX: r.left + r.width / 2,
-    clientY: Math.min(innerHeight - 24, r.top + r.height / 2),
-    view: window,
-  }));
-  return { cards: cards.length, how: "into" };
+  return {
+    x: Math.round(r.left + r.width / 2),
+    y: Math.round(Math.min(innerHeight - 40, Math.max(180, r.top + r.height * 0.55))),
+    cards: cards.length,
+  };
 })()`;
 
 export const LIST_SIDE_FOLDERS_SCRIPT = `(() => {
